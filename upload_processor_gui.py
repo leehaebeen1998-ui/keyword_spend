@@ -59,6 +59,7 @@ class UploadProcessorApp(tk.Tk):
         self._build()
         self._load_brand_profile()
         self._set_default_paths(force_empty_only=True)
+        self._set_default_download_folder()
         self._refresh_schedule()
 
     def _build(self) -> None:
@@ -82,7 +83,7 @@ class UploadProcessorApp(tk.Tk):
         ttk.Button(brand_buttons, text="설정 저장", command=self._save_current_profile).pack(side="left", padx=(6, 0))
 
         row += 1
-        self._path_row(outer, row, "다운로드 폴더", self.download_folder_var, self._choose_download_folder)
+        self._path_row(outer, row, "다운로드 폴더", self.download_folder_var, self._choose_download_folder, extra_text="폴더 열기", extra_command=self._open_download_folder)
         row += 1
         self._path_row(outer, row, "규칙 파일", self.rules_path_var, self._choose_rules_file, extra_text="인덱스 열기", extra_command=self._open_index_editor)
         row += 1
@@ -210,18 +211,19 @@ class UploadProcessorApp(tk.Tk):
     def _load_brand_profile(self) -> None:
         profile = self.profiles.get(self.brand_var.get().strip())
         if not profile:
-            self.download_folder_var.set("")
+            self.download_folder_var.set(_default_download_root())
             self.template_path_var.set("")
             self.login_command_var.set(_default_login_command())
             self.downloader_command_var.set(_default_downloader_command())
             return
         self.rules_path_var.set(str(resolve_app_path(profile.rules_path or self.rules_path_var.get())))
-        self.download_folder_var.set(profile.download_folder)
+        self.download_folder_var.set(profile.download_folder or _default_download_root())
         self.template_path_var.set(profile.template_path)
         self.output_root_var.set(_normalize_output_root(profile.output_root))
         self.upload_csv_var.set(profile.upload_csv)
         self.login_command_var.set(profile.login_command or _default_login_command())
         self.downloader_command_var.set(profile.downloader_command or _default_downloader_command())
+        self._set_default_download_folder()
 
     def _save_current_profile(self) -> None:
         brand = self.brand_var.get().strip()
@@ -262,10 +264,24 @@ class UploadProcessorApp(tk.Tk):
         if not force_empty_only or not self.output_path_var.get().strip() or _is_old_auto_output_path(self.output_path_var.get()):
             self.output_path_var.set(str(output_path))
 
+    def _set_default_download_folder(self) -> None:
+        default_root = _default_download_root()
+        if not default_root:
+            return
+        current = self.download_folder_var.get().strip()
+        if _bundled_downloader_config_path().exists() or not current or _is_packaged_placeholder_download_path(current):
+            self.download_folder_var.set(default_root)
+
     def _choose_download_folder(self) -> None:
         selected = filedialog.askdirectory(title="다운로드 결과 상위 폴더")
         if selected:
             self.download_folder_var.set(selected)
+
+    def _open_download_folder(self) -> None:
+        self._set_default_download_folder()
+        folder = Path(self.download_folder_var.get().strip() or _default_download_root())
+        folder.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(["explorer", str(folder)])
 
     def _choose_rules_file(self) -> None:
         selected = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
@@ -392,9 +408,11 @@ class UploadProcessorApp(tk.Tk):
         self._run_external_command("downloader", command)
 
     def _launch_downloader(self) -> None:
+        self._prepare_bundled_downloader()
         self._launch_external_command("downloader", self.downloader_command_var.get().strip())
 
     def _run_downloader_until_raw_available(self):
+        self._prepare_bundled_downloader()
         process = self._launch_external_command("downloader", self.downloader_command_var.get().strip())
         deadline = time.monotonic() + 1800
         last_log = 0.0
@@ -413,6 +431,34 @@ class UploadProcessorApp(tk.Tk):
             self._log("[auto] Raw files found after downloader launch.")
             return result
         raise TimeoutError("downloader raw files were not found within 30 minutes.")
+
+    def _prepare_bundled_downloader(self) -> None:
+        download_root = _default_download_root()
+        if download_root:
+            Path(download_root).mkdir(parents=True, exist_ok=True)
+            self.download_folder_var.set(download_root)
+        config_path = _bundled_downloader_config_path()
+        if not config_path.exists():
+            return
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            self._log(f"[warning] downloader config read failed: {exc}")
+            return
+        if download_root:
+            data["save_root_path"] = download_root
+        downloader_brand = _downloader_brand_name(self.brand_var.get().strip(), data)
+        if downloader_brand:
+            data["active_brand"] = downloader_brand
+            data["brand_name"] = downloader_brand
+            for brand in data.get("brands", []):
+                if str(brand.get("name") or "").strip() == downloader_brand:
+                    media = brand.get("media")
+                    if isinstance(media, dict):
+                        data["media"] = media
+                    break
+        config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._log(f"[ready] downloader save folder: {download_root}")
 
     def _template_update(self) -> None:
         self._validate_file_inputs(require_template=True)
@@ -693,6 +739,48 @@ def _is_old_auto_output_path(value: str) -> bool:
 def _default_bot_command(file_name: str) -> str:
     path = Path(__file__).resolve().parent.parent / "bots" / "report-downloader" / file_name
     return str(path) if path.exists() else ""
+
+
+def _package_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _default_download_root() -> str:
+    root = _package_root() / "downloads"
+    return str(root)
+
+
+def _bundled_downloader_config_path() -> Path:
+    return _package_root() / "bots" / "report-downloader" / "ad_report_downloader" / "config.json"
+
+
+def _is_packaged_placeholder_download_path(value: str) -> bool:
+    text = str(value or "").replace("/", "\\").casefold()
+    package = str(_package_root()).replace("/", "\\").casefold()
+    return (
+        "\\다운로드" in text
+        or text.endswith("\\download")
+        or text.endswith("\\downloads")
+        or (package in text and "\\downloads" not in text)
+    )
+
+
+def _downloader_brand_name(app_brand: str, config: dict) -> str:
+    desired = str(app_brand or "").strip()
+    names = [str(item.get("name") or "").strip() for item in config.get("brands", []) if isinstance(item, dict)]
+    if desired in names:
+        return desired
+    aliases = {
+        "법무법인 오현": "법무법인 오현 - 데일리",
+        "법무법인 태하": "법무법인 태하 - 데일리",
+    }
+    alias = aliases.get(desired)
+    if alias in names:
+        return alias
+    for name in names:
+        if desired and (name.startswith(desired) or desired.startswith(name)):
+            return name
+    return desired
 
 
 def _default_login_command() -> str:
