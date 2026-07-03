@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .brand_settings import resolve_app_path
+
 
 UPLOAD_FIELDS: tuple[str, ...] = (
     "date",
@@ -239,7 +241,7 @@ def _is_taeha_naver_raw(path: Path) -> bool:
 
 
 def _load_brand_rules(rules_path: str | Path, *, brand: str) -> dict[str, Any] | None:
-    path = Path(rules_path)
+    path = resolve_app_path(rules_path)
     if path.suffix.lower() == ".csv":
         return _load_brand_rules_from_csv(path, brand=brand)
     data = json.loads(path.read_text(encoding="utf-8-sig"))

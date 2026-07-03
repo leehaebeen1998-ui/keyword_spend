@@ -32,6 +32,21 @@ class BrandProfile:
     downloader_command: str = ""
 
 
+def resolve_app_path(path: str | Path) -> Path:
+    value = Path(path)
+    if value.is_absolute():
+        return value
+    candidates = [
+        WORKSPACE_ROOT / value,
+        WORKSPACE_ROOT.parent / value,
+        Path.cwd() / value,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 def load_profiles(path: str | Path = BRAND_PROFILES_PATH) -> dict[str, BrandProfile]:
     profile_path = Path(path)
     if not profile_path.exists():
@@ -53,7 +68,7 @@ def save_profiles(profiles: dict[str, BrandProfile], path: str | Path = BRAND_PR
 
 
 def brand_names_from_rules(path: str | Path) -> list[str]:
-    rules_path = Path(path)
+    rules_path = resolve_app_path(path)
     if not rules_path.exists() or rules_path.suffix.lower() != ".csv":
         return []
     with rules_path.open("r", encoding="utf-8-sig", newline="") as file:
@@ -72,7 +87,7 @@ def brand_names(*, rules_path: str | Path = "", profiles: dict[str, BrandProfile
 
 
 def category_names_from_rules(path: str | Path, *, brand: str) -> tuple[str, ...]:
-    rules_path = Path(path)
+    rules_path = resolve_app_path(path)
     if not rules_path.exists() or rules_path.suffix.lower() != ".csv":
         return ()
     result: list[str] = []
@@ -136,8 +151,7 @@ def _output_root(output_root: str | Path) -> Path:
 
 
 def workspace_path(path: str | Path) -> Path:
-    value = Path(path)
-    return value if value.is_absolute() else WORKSPACE_ROOT / value
+    return resolve_app_path(path)
 
 
 def ensure_directory(path: str | Path) -> None:

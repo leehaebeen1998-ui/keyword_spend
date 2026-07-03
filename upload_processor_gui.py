@@ -23,6 +23,7 @@ from index_classifier.brand_settings import (
     default_upload_csv_path,
     ensure_directory,
     load_profiles,
+    resolve_app_path,
     save_profiles,
 )
 
@@ -37,7 +38,7 @@ class UploadProcessorApp(tk.Tk):
         self.profiles = load_profiles()
         self.brand_var = tk.StringVar(value="법무법인 태하")
         self.download_folder_var = tk.StringVar()
-        self.rules_path_var = tk.StringVar(value="examples\\brand-upload-rules.example.csv")
+        self.rules_path_var = tk.StringVar(value=str(resolve_app_path("examples\\brand-upload-rules.example.csv")))
         self.output_root_var = tk.StringVar(value=str(DEFAULT_OUTPUT_ROOT))
         self.upload_csv_var = tk.StringVar()
         self.template_path_var = tk.StringVar()
@@ -211,16 +212,16 @@ class UploadProcessorApp(tk.Tk):
         if not profile:
             self.download_folder_var.set("")
             self.template_path_var.set("")
-            self.login_command_var.set("")
-            self.downloader_command_var.set("")
+            self.login_command_var.set(_default_login_command())
+            self.downloader_command_var.set(_default_downloader_command())
             return
-        self.rules_path_var.set(profile.rules_path or self.rules_path_var.get())
+        self.rules_path_var.set(str(resolve_app_path(profile.rules_path or self.rules_path_var.get())))
         self.download_folder_var.set(profile.download_folder)
         self.template_path_var.set(profile.template_path)
         self.output_root_var.set(_normalize_output_root(profile.output_root))
         self.upload_csv_var.set(profile.upload_csv)
-        self.login_command_var.set(profile.login_command)
-        self.downloader_command_var.set(profile.downloader_command)
+        self.login_command_var.set(profile.login_command or _default_login_command())
+        self.downloader_command_var.set(profile.downloader_command or _default_downloader_command())
 
     def _save_current_profile(self) -> None:
         brand = self.brand_var.get().strip()
@@ -323,6 +324,8 @@ class UploadProcessorApp(tk.Tk):
         if not rules_path:
             messagebox.showerror("오류", "규칙 파일을 먼저 선택해 주세요.")
             return
+        rules_path = str(resolve_app_path(rules_path))
+        self.rules_path_var.set(rules_path)
         if not Path(rules_path).exists():
             messagebox.showerror("오류", f"규칙 파일을 찾을 수 없습니다: {rules_path}")
             return
@@ -377,7 +380,7 @@ class UploadProcessorApp(tk.Tk):
         return process_download_folder(
             brand=self.brand_var.get().strip(),
             download_folder=self.download_folder_var.get().strip(),
-            rules_path=self.rules_path_var.get().strip(),
+            rules_path=str(resolve_app_path(self.rules_path_var.get().strip())),
             output_path=self.upload_csv_var.get().strip(),
             folder_date=self.folder_date_var.get().strip() or None,
         )
@@ -448,6 +451,9 @@ class UploadProcessorApp(tk.Tk):
         if not self.brand_var.get().strip():
             raise ValueError("브랜드를 입력해 주세요.")
         rules_path = self.rules_path_var.get().strip()
+        if rules_path:
+            rules_path = str(resolve_app_path(rules_path))
+            self.rules_path_var.set(rules_path)
         download_folder = self.download_folder_var.get().strip()
         upload_csv = self.upload_csv_var.get().strip()
         template_path = self.template_path_var.get().strip()
@@ -682,6 +688,19 @@ def _is_old_auto_output_path(value: str) -> bool:
     workspace_outputs = str(Path(__file__).parent / "outputs").replace("/", "\\").casefold()
     duplicated_outputs = str(DEFAULT_OUTPUT_ROOT / "outputs").replace("/", "\\").casefold()
     return workspace_outputs in normalized or duplicated_outputs in normalized
+
+
+def _default_bot_command(file_name: str) -> str:
+    path = Path(__file__).resolve().parent.parent / "bots" / "report-downloader" / file_name
+    return str(path) if path.exists() else ""
+
+
+def _default_login_command() -> str:
+    return _default_bot_command("login.bat") or _default_bot_command("로그인.bat")
+
+
+def _default_downloader_command() -> str:
+    return _default_bot_command("run.bat")
 
 
 def _normalize_external_command(command: str) -> str:

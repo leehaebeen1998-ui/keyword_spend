@@ -25,11 +25,14 @@
    - 공휴일/수동 기간은 프로그램의 수동 기간에 입력
 
 5. 외부 프로그램 연결
-   로그인 명령 예시:
-   C:\report-downloader\로그인.bat
+   이 배포본은 로그인 봇/다운로더 봇을 bots\report-downloader 안에 포함합니다.
+   새로 압축을 푼 경우 프로그램이 기본 명령을 자동으로 잡습니다.
 
-   다운로더 명령 예시:
-   C:\report-downloader\run.bat
+   로그인 명령 기본값:
+   bots\report-downloader\login.bat
+
+   다운로더 명령 기본값:
+   bots\report-downloader\run.bat
 
 6. 규칙 수정
    rules.bat 실행 후 브랜드별 규칙을 수정
