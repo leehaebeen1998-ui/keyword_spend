@@ -153,6 +153,26 @@ def build_upload_rows_from_raw(
 ) -> list[dict[str, Any]]:
     path = Path(input_path)
     rows, headers = _read_raw_table(path)
+    return build_upload_rows_from_records(
+        brand=brand,
+        media=media,
+        rows=rows,
+        source_path=path,
+        default_category=default_category,
+        rules_path=rules_path,
+    )
+
+
+def build_upload_rows_from_records(
+    *,
+    brand: str,
+    media: str,
+    rows: list[dict[str, Any]],
+    source_path: str | Path,
+    default_category: str = "",
+    rules_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    path = Path(source_path)
     external_rules = _load_brand_rules(rules_path, brand=brand) if rules_path else None
     if not external_rules:
         raise ValueError("rules_path is required. 브랜드별 업로드 규칙 CSV/JSON을 선택해 주세요.")
@@ -161,6 +181,41 @@ def build_upload_rows_from_raw(
         for row in rows
         if not _skip_raw_row_for_file(row, path=path)
     ]
+
+
+def build_ilo_merged_upload_rows(
+    *,
+    brand: str,
+    media: str,
+    keyword_path: str | Path,
+    search_path: str | Path,
+    rules_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    keyword_rows, _ = _read_raw_table(Path(keyword_path))
+    search_rows, _ = _read_raw_table(Path(search_path))
+    merged: list[dict[str, Any]] = []
+
+    for row in search_rows:
+        if str(row.get("검색 유형") or "").strip() == "일치":
+            continue
+        merged.append(dict(row))
+
+    for row in keyword_rows:
+        if str(row.get("검색 유형") or "").strip() != "일치":
+            continue
+        converted = dict(row)
+        converted["검색어"] = converted.get("키워드", "")
+        converted.pop("키워드", None)
+        converted["검색 유형"] = "확장"
+        merged.append(converted)
+
+    return build_upload_rows_from_records(
+        brand=brand,
+        media=media,
+        rows=merged,
+        source_path=Path(search_path),
+        rules_path=rules_path,
+    )
 
 
 def sort_upload_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -234,7 +289,7 @@ def _build_generic_row(row: dict[str, Any], *, media: str, path: Path, rules: di
     campaign_type = _field(row, fields, "campaign_type", "캠페인유형", "캠페인 유형", "campaign_type")
     campaign = _field(row, fields, "campaign", "캠페인", "캠페인명", "campaign")
     device = _field(row, fields, "device", "PC/모바일 매체", "기기", "device")
-    keyword = _field(row, fields, "keyword", "키워드", "검색 키워드", "keyword")
+    keyword = _field(row, fields, "keyword", "키워드", "검색어", "검색 키워드", "keyword")
     keyword = _keyword_for_upload(keyword=keyword, campaign=campaign, campaign_type=campaign_type)
     url = _field(row, fields, "url", "URL", "url")
 
@@ -329,6 +384,10 @@ def _infer_account_from_rules(path: Path, rules: dict[str, Any], *, media: str) 
             for group in match.groups():
                 if group:
                     return group
+    for pattern in (r",(\d{4,})(?:$|_)", r"_(\d{4,})(?:_|$)", r"(\d{4,})"):
+        match = re.search(pattern, path.stem)
+        if match:
+            return match.group(1)
     return ""
 
 

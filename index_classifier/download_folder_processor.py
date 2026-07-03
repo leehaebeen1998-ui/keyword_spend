@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .raw_upload_builder import UPLOAD_FIELDS, build_upload_rows_from_raw, sort_upload_rows
+from .raw_upload_builder import UPLOAD_FIELDS, build_ilo_merged_upload_rows, build_upload_rows_from_raw, sort_upload_rows
 from .schedule_rules import parse_date
 
 
@@ -73,6 +73,8 @@ def infer_media(path: Path) -> str:
         return "Google SA"
     if "/naver/" in text or "naver" in name:
         return "Naver"
+    if "일로 데일리" in path.name:
+        return "Naver"
     return ""
 
 
@@ -94,7 +96,24 @@ def process_download_folder(
         raise FileNotFoundError(f"처리할 raw 파일을 찾을 수 없습니다{date_hint}: {Path(download_folder)}{available_hint}")
 
     all_rows: list[dict[str, Any]] = []
+    consumed: set[Path] = set()
+    if _uses_ilo_merge(brand):
+        for keyword_plan, search_plan in _ilo_pairs(plans):
+            consumed.add(keyword_plan.path)
+            consumed.add(search_plan.path)
+            all_rows.extend(
+                build_ilo_merged_upload_rows(
+                    brand=brand,
+                    media=search_plan.media,
+                    keyword_path=keyword_plan.path,
+                    search_path=search_plan.path,
+                    rules_path=rules_path,
+                )
+            )
+
     for plan in plans:
+        if plan.path in consumed:
+            continue
         all_rows.extend(
             build_upload_rows_from_raw(
                 brand=brand,
@@ -123,6 +142,36 @@ def process_download_folder(
         skipped_files=skipped,
         duplicate_rows=duplicate_rows,
     )
+
+
+def _uses_ilo_merge(brand: str) -> bool:
+    text = str(brand).casefold().replace(" ", "")
+    return text in {"lawyergeon:naver", "법무법인일로2", "법무법인일로3"} or "일로" in text
+
+
+def _ilo_pairs(plans: list[RawFilePlan]) -> list[tuple[RawFilePlan, RawFilePlan]]:
+    groups: dict[str, dict[str, RawFilePlan]] = {}
+    for plan in plans:
+        name = plan.path.name
+        if "일로 데일리 소진액_ver" not in name:
+            continue
+        key = _ilo_account_key(plan.path)
+        if not key:
+            continue
+        version = "ver2" if "ver2" in name else "ver3" if "ver3" in name else ""
+        if not version:
+            continue
+        groups.setdefault(key, {})[version] = plan
+    return [
+        (group["ver2"], group["ver3"])
+        for group in groups.values()
+        if "ver2" in group and "ver3" in group
+    ]
+
+
+def _ilo_account_key(path: Path) -> str:
+    match = re.search(r",(\d+)(?:\.[^.]+)?$", path.name)
+    return match.group(1) if match else ""
 
 
 def write_upload_rows(output_path: str | Path, rows: list[dict[str, Any]]) -> None:
