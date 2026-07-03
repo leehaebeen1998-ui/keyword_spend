@@ -1,10 +1,16 @@
 키워드별 소진내역 가공 프로그램
 
+0. 다운로드 주의
+   GitHub의 Source code(zip)가 아니라 release assets의
+   keyword-spend-processor_*.zip 파일을 다운로드해야 합니다.
+
 1. 처음 1회
-   설치.bat 더블클릭
+   install.bat 더블클릭
+   한글 배치가 필요한 경우 설치.bat도 사용할 수 있습니다.
 
 2. 매일 실행
-   실행.bat 더블클릭
+   run.bat 더블클릭
+   한글 배치가 필요한 경우 실행.bat도 사용할 수 있습니다.
 
 3. 기본 흐름
    - 브랜드 선택
@@ -26,7 +32,8 @@
    C:\report-downloader\run.bat
 
 6. 규칙 수정
-   규칙편집.bat 실행 후 브랜드별 규칙을 수정
+   rules.bat 실행 후 브랜드별 규칙을 수정
+   한글 배치가 필요한 경우 규칙편집.bat도 사용할 수 있습니다.
 
 주의
    Excel 템플릿 파일이 열려 있으면 저장이 실패하거나 이전 값이 보일 수 있습니다.
