@@ -24,6 +24,7 @@ from index_classifier.brand_settings import (
     ensure_directory,
     load_profiles,
     resolve_app_path,
+    safe_name,
     save_profiles,
 )
 
@@ -56,6 +57,8 @@ class UploadProcessorApp(tk.Tk):
         self.status_var = tk.StringVar(value="대기")
         self._running = False
         self._operation_started_at: float | None = None
+        self._syncing_default_paths = False
+        self.run_date_var.trace_add("write", self._on_run_date_changed)
 
         self._build()
         self._load_brand_profile()
@@ -218,6 +221,16 @@ class UploadProcessorApp(tk.Tk):
         self._set_default_paths(force_empty_only=False)
         self._refresh_schedule()
 
+    def _on_run_date_changed(self, *_args) -> None:
+        if self._syncing_default_paths:
+            return
+        self._syncing_default_paths = True
+        try:
+            self._set_default_paths(force_empty_only=True)
+        finally:
+            self._syncing_default_paths = False
+        self.after_idle(self._refresh_schedule)
+
     def _load_brand_profile(self) -> None:
         profile = self.profiles.get(self.brand_var.get().strip())
         if not profile:
@@ -269,9 +282,21 @@ class UploadProcessorApp(tk.Tk):
         template_path = self.template_path_var.get().strip()
         upload_csv = default_upload_csv_path(brand=brand, run_date=run_date, output_root=output_root)
         output_path = default_output_path(brand=brand, run_date=run_date, template_path=template_path, output_root=output_root)
-        if not force_empty_only or not self.upload_csv_var.get().strip() or _is_old_auto_output_path(self.upload_csv_var.get()):
+        current_upload_csv = self.upload_csv_var.get().strip()
+        current_output_path = self.output_path_var.get().strip()
+        if (
+            not force_empty_only
+            or not current_upload_csv
+            or _is_old_auto_output_path(current_upload_csv)
+            or _is_current_auto_output_path(current_upload_csv, brand=brand, output_root=output_root)
+        ):
             self.upload_csv_var.set(str(upload_csv))
-        if not force_empty_only or not self.output_path_var.get().strip() or _is_old_auto_output_path(self.output_path_var.get()):
+        if (
+            not force_empty_only
+            or not current_output_path
+            or _is_old_auto_output_path(current_output_path)
+            or _is_current_auto_output_path(current_output_path, brand=brand, output_root=output_root)
+        ):
             self.output_path_var.set(str(output_path))
 
     def _set_default_download_folder(self) -> None:
@@ -524,7 +549,10 @@ class UploadProcessorApp(tk.Tk):
         if not Path(rules_path).exists():
             raise FileNotFoundError("규칙 파일을 찾을 수 없습니다.")
         if not Path(download_folder).exists():
-            raise FileNotFoundError("다운로드 폴더를 찾을 수 없습니다.")
+            if _is_default_download_root(download_folder):
+                Path(download_folder).mkdir(parents=True, exist_ok=True)
+            else:
+                raise FileNotFoundError("다운로드 폴더를 찾을 수 없습니다.")
         if require_template and not template_path:
             raise ValueError("템플릿 파일을 선택해 주세요.")
         if require_template and not output_path:
@@ -745,6 +773,21 @@ def _is_old_auto_output_path(value: str) -> bool:
     workspace_outputs = str(Path(__file__).parent / "outputs").replace("/", "\\").casefold()
     duplicated_outputs = str(DEFAULT_OUTPUT_ROOT / "outputs").replace("/", "\\").casefold()
     return workspace_outputs in normalized or duplicated_outputs in normalized
+
+
+def _is_current_auto_output_path(value: str, *, brand: str, output_root: str) -> bool:
+    if not value or not brand:
+        return False
+    text = str(value).replace("/", "\\").casefold()
+    root = str(Path(output_root or DEFAULT_OUTPUT_ROOT)).replace("/", "\\").rstrip("\\").casefold()
+    brand_part = f"\\{safe_name(brand).casefold()}\\"
+    return bool(root and root in text and brand_part in text)
+
+
+def _is_default_download_root(value: str) -> bool:
+    text = str(value or "").replace("/", "\\").rstrip("\\").casefold()
+    default = _default_download_root().replace("/", "\\").rstrip("\\").casefold()
+    return bool(text and text == default)
 
 
 def _default_bot_command(file_name: str) -> str:
