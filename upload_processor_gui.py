@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from index_classifier.download_folder_processor import process_download_folder
 from index_classifier.brand_template_writer import write_brand_template
+from index_classifier.google_sheets_uploader import upload_csv_to_google_sheet
 from index_classifier.schedule_rules import custom_download_window, default_download_window, parse_date, parse_time
 from index_classifier.brand_settings import (
     BrandProfile,
@@ -28,13 +29,16 @@ from index_classifier.brand_settings import (
     save_profiles,
 )
 
+DEFAULT_TEST_SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1AHu6zuHdrNKJ8mcL9jFrRenlzZFL91URAMqwPN5UVgM/edit?gid=0#gid=0"
+DEFAULT_TEST_SPREADSHEET_SHEET = "시트1"
+
 
 class UploadProcessorApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("브랜드 파일 가공")
-        self.geometry("900x620")
-        self.minsize(820, 520)
+        self.geometry("940x700")
+        self.minsize(860, 600)
 
         self.profiles = load_profiles()
         self.brand_var = tk.StringVar(value="법무법인 태하")
@@ -49,6 +53,10 @@ class UploadProcessorApp(tk.Tk):
         self.run_date_var = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
         self.login_command_var = tk.StringVar()
         self.downloader_command_var = tk.StringVar()
+        self.spreadsheet_url_var = tk.StringVar(value=DEFAULT_TEST_SPREADSHEET_URL)
+        self.spreadsheet_sheet_var = tk.StringVar(value=DEFAULT_TEST_SPREADSHEET_SHEET)
+        self.spreadsheet_credentials_var = tk.StringVar()
+        self.spreadsheet_upload_mode_var = tk.StringVar(value="삭제 후 신규")
         self.schedule_mode_var = tk.StringVar(value="일반")
         self.start_time_var = tk.StringVar(value="08:00")
         self.custom_start_var = tk.StringVar()
@@ -137,6 +145,25 @@ class UploadProcessorApp(tk.Tk):
         ttk.Button(integration, text="다운로더 실행", command=self._run_downloader).grid(row=1, column=2, sticky="e", pady=(8, 0))
 
         row += 1
+        sheets = ttk.LabelFrame(outer, text="스프레드시트 업로드", padding=8)
+        sheets.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 4))
+        sheets.columnconfigure(1, weight=1)
+        ttk.Label(sheets, text="스프레드시트 URL/ID").grid(row=0, column=0, sticky="w")
+        ttk.Entry(sheets, textvariable=self.spreadsheet_url_var).grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        ttk.Label(sheets, text="시트명").grid(row=0, column=2, sticky="w")
+        ttk.Entry(sheets, textvariable=self.spreadsheet_sheet_var, width=18).grid(row=0, column=3, sticky="ew", padx=(8, 0))
+        ttk.Label(sheets, text="인증 JSON").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(sheets, textvariable=self.spreadsheet_credentials_var).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(8, 0))
+        ttk.Button(sheets, text="찾기", command=self._choose_spreadsheet_credentials).grid(row=1, column=2, sticky="e", pady=(8, 0))
+        ttk.Combobox(
+            sheets,
+            textvariable=self.spreadsheet_upload_mode_var,
+            values=["삭제 후 신규", "기존 시트 누적"],
+            width=16,
+            state="readonly",
+        ).grid(row=1, column=3, sticky="ew", padx=(8, 0), pady=(8, 0))
+
+        row += 1
         schedule = ttk.LabelFrame(outer, text="스케줄", padding=8)
         schedule.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 4))
         schedule.columnconfigure(5, weight=1)
@@ -170,6 +197,7 @@ class UploadProcessorApp(tk.Tk):
         ttk.Label(buttons, textvariable=self.status_var).pack(side="left", padx=(0, 16))
         ttk.Button(buttons, text="1. 업로드 CSV 생성", command=self._run_process_folder).pack(side="left")
         ttk.Button(buttons, text="2. 템플릿 반영", command=self._run_template_update).pack(side="left", padx=(8, 0))
+        ttk.Button(buttons, text="3. 스프레드시트 업로드", command=self._run_spreadsheet_upload).pack(side="left", padx=(8, 0))
         ttk.Button(buttons, text="전체 실행", command=self._run_all).pack(side="left", padx=(8, 0))
 
         row += 1
@@ -247,6 +275,10 @@ class UploadProcessorApp(tk.Tk):
             self.template_path_var.set("")
             self.login_command_var.set(_default_login_command())
             self.downloader_command_var.set(_default_downloader_command())
+            self.spreadsheet_url_var.set("")
+            self.spreadsheet_sheet_var.set("")
+            self.spreadsheet_credentials_var.set("")
+            self.spreadsheet_upload_mode_var.set("삭제 후 신규")
             return
         self.rules_path_var.set(str(resolve_app_path(profile.rules_path or self.rules_path_var.get())))
         self.download_folder_var.set(profile.download_folder or _default_download_root())
@@ -255,6 +287,10 @@ class UploadProcessorApp(tk.Tk):
         self.upload_csv_var.set(profile.upload_csv)
         self.login_command_var.set(profile.login_command or _default_login_command())
         self.downloader_command_var.set(profile.downloader_command or _default_downloader_command())
+        self.spreadsheet_url_var.set(profile.spreadsheet_url)
+        self.spreadsheet_sheet_var.set(profile.spreadsheet_sheet_name)
+        self.spreadsheet_credentials_var.set(profile.spreadsheet_credentials_path)
+        self.spreadsheet_upload_mode_var.set(_spreadsheet_upload_mode_label(profile.spreadsheet_upload_mode))
         self._set_default_download_folder()
 
     def _save_current_profile(self) -> None:
@@ -271,6 +307,10 @@ class UploadProcessorApp(tk.Tk):
             upload_csv=self.upload_csv_var.get().strip(),
             login_command=self.login_command_var.get().strip(),
             downloader_command=self.downloader_command_var.get().strip(),
+            spreadsheet_url=self.spreadsheet_url_var.get().strip(),
+            spreadsheet_sheet_name=self.spreadsheet_sheet_var.get().strip(),
+            spreadsheet_credentials_path=self.spreadsheet_credentials_var.get().strip(),
+            spreadsheet_upload_mode=_spreadsheet_upload_mode(self.spreadsheet_upload_mode_var.get()),
         )
         try:
             path = save_profiles(self.profiles)
@@ -358,14 +398,22 @@ class UploadProcessorApp(tk.Tk):
         if selected:
             self.output_path_var.set(selected)
 
+    def _choose_spreadsheet_credentials(self) -> None:
+        selected = filedialog.askopenfilename(filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
+        if selected:
+            self.spreadsheet_credentials_var.set(selected)
+
     def _run_process_folder(self) -> None:
         self._run_background(self._process_folder)
 
     def _run_template_update(self) -> None:
         self._run_background(self._template_update)
 
+    def _run_spreadsheet_upload(self) -> None:
+        self._run_background(self._spreadsheet_upload)
+
     def _run_all(self) -> None:
-        self._run_background(lambda: (self._process_folder(), self._template_update()))
+        self._run_background(lambda: (self._process_folder(), self._template_update(), self._spreadsheet_upload_if_configured()))
 
     def _run_login_bot(self) -> None:
         self._run_background(self._launch_login_bot)
@@ -582,6 +630,45 @@ class UploadProcessorApp(tk.Tk):
         self._log(f"[완료] 템플릿 반영: {result.output_path}")
         self._log(f"  반영 행 수: {result.written_rows}")
         self._log(f"  수정 시트: {', '.join(result.touched_sheets) if result.touched_sheets else '(없음)'}")
+
+    def _spreadsheet_upload_if_configured(self) -> None:
+        if not (
+            self.spreadsheet_url_var.get().strip()
+            and self.spreadsheet_sheet_var.get().strip()
+            and self.spreadsheet_credentials_var.get().strip()
+        ):
+            self._log("[안내] 스프레드시트 설정이 비어 있어 업로드를 건너뜁니다.")
+            return
+        self._spreadsheet_upload()
+
+    def _spreadsheet_upload(self) -> None:
+        rows_csv = Path(self.upload_csv_var.get().strip())
+        if not rows_csv.exists():
+            self._log(f"[안내] 업로드 CSV가 없어 먼저 생성합니다: {rows_csv}")
+            self._process_folder()
+        if not rows_csv.exists():
+            raise FileNotFoundError(f"업로드 CSV 생성에 실패했습니다: {rows_csv}")
+        spreadsheet_url = self.spreadsheet_url_var.get().strip()
+        sheet_name = self.spreadsheet_sheet_var.get().strip()
+        credentials = self.spreadsheet_credentials_var.get().strip()
+        if not spreadsheet_url:
+            raise ValueError("스프레드시트 URL/ID를 입력해 주세요.")
+        if not sheet_name:
+            raise ValueError("업로드할 시트명을 입력해 주세요.")
+        if not credentials or not Path(credentials).exists():
+            raise FileNotFoundError("서비스 계정 인증 JSON 파일을 선택해 주세요.")
+        self._save_current_profile()
+        self._log("[진행] 스프레드시트 업로드 시작")
+        result = upload_csv_to_google_sheet(
+            csv_path=rows_csv,
+            spreadsheet=spreadsheet_url,
+            sheet_name=sheet_name,
+            credentials_path=credentials,
+            mode=_spreadsheet_upload_mode(self.spreadsheet_upload_mode_var.get()),
+        )
+        self._log(f"[완료] 스프레드시트 업로드: {result['sheet_name']}")
+        self._log(f"  방식: {'기존 시트 누적' if result['mode'] == 'append' else '삭제 후 신규'}")
+        self._log(f"  업로드 행 수: {result['rows']}")
 
     def _validate_file_inputs(self, *, require_template: bool) -> None:
         self._set_default_paths(force_empty_only=True)
@@ -914,6 +1001,14 @@ def _template_update_mode(value: str) -> str:
 
 def _template_category_mode(value: str) -> str:
     return "single_sheet" if "단일" in str(value or "") else "category_sheets"
+
+
+def _spreadsheet_upload_mode(value: str) -> str:
+    return "append" if "누적" in str(value or "") else "replace"
+
+
+def _spreadsheet_upload_mode_label(value: str) -> str:
+    return "기존 시트 누적" if str(value or "").casefold() == "append" else "삭제 후 신규"
 
 
 def main() -> None:

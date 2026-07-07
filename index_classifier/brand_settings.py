@@ -30,6 +30,10 @@ class BrandProfile:
     upload_csv: str = ""
     login_command: str = ""
     downloader_command: str = ""
+    spreadsheet_url: str = ""
+    spreadsheet_sheet_name: str = ""
+    spreadsheet_credentials_path: str = ""
+    spreadsheet_upload_mode: str = "replace"
 
 
 def resolve_app_path(path: str | Path) -> Path:
