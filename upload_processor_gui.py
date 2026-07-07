@@ -45,6 +45,7 @@ class UploadProcessorApp(tk.Tk):
         self.template_path_var = tk.StringVar()
         self.output_path_var = tk.StringVar()
         self.template_update_mode_var = tk.StringVar(value="삭제 후 신규")
+        self.template_category_mode_var = tk.StringVar(value="카테고리별 시트")
         self.run_date_var = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
         self.login_command_var = tk.StringVar()
         self.downloader_command_var = tk.StringVar()
@@ -111,6 +112,14 @@ class UploadProcessorApp(tk.Tk):
             width=18,
             state="readonly",
         ).grid(row=row, column=1, sticky="w", pady=4)
+        ttk.Label(outer, text="시트 방식").grid(row=row, column=1, sticky="e", pady=4, padx=(0, 210))
+        ttk.Combobox(
+            outer,
+            textvariable=self.template_category_mode_var,
+            values=["카테고리별 시트", "단일 시트"],
+            width=16,
+            state="readonly",
+        ).grid(row=row, column=1, sticky="e", pady=4)
         row += 1
         ttk.Label(outer, text="실행 기준일").grid(row=row, column=0, sticky="w", pady=4)
         ttk.Entry(outer, textvariable=self.run_date_var).grid(row=row, column=1, sticky="ew", pady=4)
@@ -566,6 +575,7 @@ class UploadProcessorApp(tk.Tk):
             rows=rows,
             run_date=self.run_date_var.get().strip() or None,
             update_mode=_template_update_mode(self.template_update_mode_var.get()),
+            category_mode=_template_category_mode(self.template_category_mode_var.get()),
         )
         if result.written_rows <= 0:
             raise ValueError("템플릿에 반영된 행이 없습니다. 실행 기준일, 시트명, 카테고리 규칙을 확인해 주세요.")
@@ -900,6 +910,10 @@ def _normalize_external_command(command: str) -> str:
 
 def _template_update_mode(value: str) -> str:
     return "append" if "누적" in str(value or "") else "replace"
+
+
+def _template_category_mode(value: str) -> str:
+    return "single_sheet" if "단일" in str(value or "") else "category_sheets"
 
 
 def main() -> None:

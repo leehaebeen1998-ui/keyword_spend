@@ -15,6 +15,9 @@ from .brand_upload import BrandUploadRule, DEFAULT_BRAND_RULES, SheetTarget, bui
 
 
 HEADER_ALIASES: dict[str, tuple[str, ...]] = {
+    "date": ("일자", "날짜", "일별", "date"),
+    "media": ("매체", "media"),
+    "category": ("카테고리", "분류", "category"),
     "campaign_type": ("캠페인유형", "campaign_type"),
     "device": ("PC/모바일", "device"),
     "keyword": ("키워드", "keyword", "keyword_name"),
@@ -58,6 +61,7 @@ def write_brand_template(
     rows: list[dict[str, Any]],
     run_date: str | date | datetime | None = None,
     update_mode: str = "replace",
+    category_mode: str = "category_sheets",
 ) -> TemplateWriteResult:
     rule = _brand_rule_for_upload(brand=brand, rows=rows)
     template = Path(template_path)
@@ -65,9 +69,9 @@ def write_brand_template(
     suffix = template.suffix.lower()
 
     if suffix == ".xlsx":
-        return write_xlsx_template(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode)
+        return write_xlsx_template(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode, category_mode=category_mode)
     if suffix == ".xlsb":
-        return write_xlsb_template_with_excel(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode)
+        return write_xlsb_template_with_excel(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode, category_mode=category_mode)
     raise ValueError(f"Unsupported template type: {template.suffix}")
 
 
@@ -100,6 +104,7 @@ def write_xlsx_template(
     rows: list[dict[str, Any]],
     run_date: str | date | datetime | None = None,
     update_mode: str = "replace",
+    category_mode: str = "category_sheets",
 ) -> TemplateWriteResult:
     try:
         from copy import copy
@@ -109,12 +114,12 @@ def write_xlsx_template(
 
     current = parse_run_date(run_date)
     workbook = load_workbook(template_path)
-    targets = _build_sheet_targets_for_rows(rule, current, rows)
+    targets = _single_sheet_targets(rows, rule, current) if category_mode == "single_sheet" else _build_sheet_targets_for_rows(rule, current, rows)
     touched: list[str] = []
     written = 0
 
     for target in targets:
-        sheet_name = _resolve_workbook_sheet_name(workbook.sheetnames, target.sheet_name)
+        sheet_name = _first_data_sheet_name(workbook) if target.sheet_name == "__SINGLE_SHEET__" else _resolve_workbook_sheet_name(workbook.sheetnames, target.sheet_name)
         if sheet_name is None:
             continue
         target_rows = _rows_for_target(rows, target)
@@ -167,8 +172,10 @@ def write_xlsb_template_with_excel(
     rows: list[dict[str, Any]],
     run_date: str | date | datetime | None = None,
     update_mode: str = "replace",
+    category_mode: str = "category_sheets",
 ) -> TemplateWriteResult:
     current = parse_run_date(run_date)
+    sheet_targets = _single_sheet_targets(rows, rule, current) if category_mode == "single_sheet" else _build_sheet_targets_for_rows(rule, current, rows)
     targets = [
         {
             "sheet_name": target.sheet_name,
@@ -177,7 +184,7 @@ def write_xlsb_template_with_excel(
             "media": target.media,
             "rows": [_prepare_write_row(row) for row in _rows_for_target(rows, target)],
         }
-        for target in _build_sheet_targets_for_rows(rule, current, rows)
+        for target in sheet_targets
     ]
     output = Path(output_path)
     _ensure_directory(output.parent)
@@ -221,11 +228,42 @@ def write_xlsb_template_with_excel(
 
 
 def _rows_for_target(rows: Iterable[dict[str, Any]], target: SheetTarget) -> list[dict[str, Any]]:
+    if target.sheet_name == "__SINGLE_SHEET__":
+        result = [row for row in rows if _row_matches_single_sheet_target(row, target)]
+        result = _merge_rows_for_sheet(result)
+        result = [row for row in result if _has_positive_cost(row)]
+        result.sort(key=lambda row: _to_number(_first(row, "cost", "총비용")), reverse=True)
+        return result
     result = [row for row in rows if _row_matches_target(row, target)]
     result = _merge_rows_for_sheet(result)
     result = [row for row in result if _has_positive_cost(row)]
     result.sort(key=lambda row: _to_number(_first(row, "cost", "총비용")), reverse=True)
     return result
+
+
+def _single_sheet_targets(rows: list[dict[str, Any]], rule: BrandUploadRule, current: date) -> list[SheetTarget]:
+    dates = sorted({target.report_date for target in build_sheet_targets(rule, current)})
+    if not dates:
+        dates = sorted({_parse_row_date(_first(row, "date", "날짜", "일자")) for row in rows if _parse_row_date(_first(row, "date", "날짜", "일자"))})
+    if not dates:
+        dates = [current]
+    return [
+        SheetTarget(
+            brand=rule.brand,
+            category="__ALL_DATES__",
+            report_date=dates[0],
+            sheet_name="__SINGLE_SHEET__",
+            media=",".join(target_date.strftime("%Y%m%d") for target_date in dates),
+        )
+    ]
+
+
+def _row_matches_single_sheet_target(row: dict[str, Any], target: SheetTarget) -> bool:
+    row_date = _parse_row_date(_first(row, "date", "날짜", "일자"))
+    if not row_date:
+        return False
+    allowed = {value for value in str(target.media or "").split(",") if value}
+    return row_date.strftime("%Y%m%d") in allowed if allowed else row_date == target.report_date
 
 
 def _dedupe_rows_for_sheet(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -373,20 +411,44 @@ def _matches_campaign_kind(row: dict[str, Any], target: SheetTarget) -> bool:
 def _find_header_row_openpyxl(worksheet) -> int | None:
     for row_idx in range(1, min(worksheet.max_row, 12) + 1):
         values = {str(cell.value or "").strip() for cell in worksheet[row_idx]}
-        if "키워드" in values and ("총비용" in values or "노출순위" in values):
+        normalized_values = {_normalize_header_label(value) for value in values}
+        if (
+            _has_any_header(normalized_values, "keyword")
+            and (_has_any_header(normalized_values, "cost") or _has_any_header(normalized_values, "rank"))
+        ):
             return row_idx
     return None
 
 
 def _header_map_openpyxl(worksheet, header_row: int) -> dict[str, int]:
     headers = {str(cell.value or "").strip(): cell.column for cell in worksheet[header_row]}
+    normalized_headers = {_normalize_header_label(name): column for name, column in headers.items()}
     result: dict[str, int] = {}
     for field, aliases in HEADER_ALIASES.items():
         for alias in aliases:
             if alias in headers:
                 result[field] = headers[alias]
                 break
+            normalized = _normalize_header_label(alias)
+            if normalized in normalized_headers:
+                result[field] = normalized_headers[normalized]
+                break
     return result
+
+
+def _first_data_sheet_name(workbook) -> str | None:
+    for worksheet in workbook.worksheets:
+        if _find_header_row_openpyxl(worksheet) is not None:
+            return worksheet.title
+    return workbook.sheetnames[0] if workbook.sheetnames else None
+
+
+def _has_any_header(normalized_values: set[str], field: str) -> bool:
+    return any(_normalize_header_label(alias) in normalized_values for alias in HEADER_ALIASES.get(field, ()))
+
+
+def _normalize_header_label(value: Any) -> str:
+    return re.sub(r"[\s_()/%\[\]\-]+", "", str(value or "").casefold())
 
 
 def _clear_openpyxl_data(worksheet, start_row: int, columns: Iterable[int]) -> None:
@@ -407,6 +469,8 @@ def _append_start_row_openpyxl(worksheet, start_row: int, header_map: dict[str, 
 
 
 def _value_for_field(row: dict[str, Any], field: str) -> Any:
+    if field == "date":
+        return _date_display_value(_first(row, field, *_aliases_for_field(field)))
     if field in {"impressions", "clicks", "cost", "conversions", "rank"}:
         return _to_number(_first(row, field, *_aliases_for_field(field)))
     if field == "ctr":
@@ -418,6 +482,11 @@ def _value_for_field(row: dict[str, Any], field: str) -> Any:
     if field == "cost_per_conversion":
         return _rate_or_calc(row, "cost_per_conversion", "전환당비용", numerator="cost", denominator="conversions")
     return _first(row, field, *_aliases_for_field(field))
+
+
+def _date_display_value(value: Any) -> str:
+    parsed = _parse_row_date(value)
+    return parsed.strftime("%Y-%m-%d") if parsed else str(value or "")
 
 
 def _prepare_write_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -622,7 +691,14 @@ function Normalize-SheetName($value) {
   if ($null -eq $value) { return '' }
   return ([string]$value).ToLowerInvariant().Replace('_', '').Replace(' ', '').Trim()
 }
+function Normalize-HeaderName($value) {
+  if ($null -eq $value) { return '' }
+  return ([regex]::Replace(([string]$value).ToLowerInvariant(), '[\s_()/%\[\]\-]+', '')).Trim()
+}
 function Resolve-Worksheet($workbook, $targetName) {
+  if ($targetName -eq '__SINGLE_SHEET__') {
+    foreach ($sheet in $workbook.Worksheets) { return $sheet }
+  }
   foreach ($sheet in $workbook.Worksheets) {
     if ($sheet.Name -eq $targetName) { return $sheet }
   }
@@ -643,22 +719,28 @@ try {
     $headerRow = 0
     for ($r = $used.Row; $r -le [Math]::Min($lastUsedRow, $used.Row + 14); $r++) {
       $vals = @()
-      for ($c = $used.Column; $c -le $lastUsedCol; $c++) { $vals += [string]$ws.Cells.Item($r,$c).Text }
-      if (($vals -contains '키워드') -and (($vals -contains '총비용') -or ($vals -contains '노출순위'))) {
+      for ($c = $used.Column; $c -le $lastUsedCol; $c++) { $vals += (Normalize-HeaderName ([string]$ws.Cells.Item($r,$c).Text)) }
+      if (($vals -contains (Normalize-HeaderName '키워드')) -and (($vals -contains (Normalize-HeaderName '총비용')) -or ($vals -contains (Normalize-HeaderName '노출순위')) -or ($vals -contains (Normalize-HeaderName 'cost')))) {
         $headerRow = $r
         break
       }
     }
     if ($headerRow -eq 0) { continue }
     $headerMap = @{}
+    $normalizedHeaderMap = @{}
     for ($c = $used.Column; $c -le $lastUsedCol; $c++) {
       $name = [string]$ws.Cells.Item($headerRow,$c).Text
-      if ($name) { $headerMap[$name] = $c }
+      if ($name) {
+        $headerMap[$name] = $c
+        $normalizedHeaderMap[(Normalize-HeaderName $name)] = $c
+      }
     }
     $fieldCols = @{}
     foreach ($field in $payload.headers.PSObject.Properties.Name) {
       foreach ($alias in $payload.headers.$field) {
         if ($headerMap.ContainsKey($alias)) { $fieldCols[$field] = $headerMap[$alias]; break }
+        $normalizedAlias = Normalize-HeaderName $alias
+        if ($normalizedHeaderMap.ContainsKey($normalizedAlias)) { $fieldCols[$field] = $normalizedHeaderMap[$normalizedAlias]; break }
       }
     }
     $dataStart = $headerRow + 2

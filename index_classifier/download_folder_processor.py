@@ -14,7 +14,7 @@ from .raw_upload_builder import UPLOAD_FIELDS, build_ilo_merged_upload_rows, bui
 from .schedule_rules import parse_date
 
 
-RAW_SUFFIXES = {".csv", ".tsv"}
+RAW_SUFFIXES = {".csv", ".tsv", ".xlsx", ".xlsm"}
 SKIP_NAME_TOKENS = ("upload_rows", "cleaned", "failed", "index-log", "index_log")
 
 

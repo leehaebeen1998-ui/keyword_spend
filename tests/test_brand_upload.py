@@ -329,6 +329,125 @@ class BrandUploadTests(unittest.TestCase):
             self.assertEqual(saved["ohcrime(형사)1일"]["A3"].value, "형사변호사")
             self.assertIsNone(saved["ohcrime(형사)1일"]["A4"].value)
 
+    def test_template_writer_merges_duplicate_keywords_within_category(self):
+        try:
+            from openpyxl import Workbook, load_workbook
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+
+        with TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            template = temp / "template.xlsx"
+            output = temp / "output.xlsx"
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = "ohcrime(형사)1일"
+            worksheet.append(["키워드", "노출수", "클릭수", "클릭률", "클릭비용", "총비용"])
+            worksheet.append([])
+            workbook.save(template)
+
+            base = {
+                "date": "2026.06.30",
+                "media": "Naver",
+                "category": "형사",
+                "campaign_type": "파워링크",
+                "device": "모바일",
+                "keyword": "형사변호사",
+                "impressions": "100",
+                "clicks": "4",
+                "cost": "10000",
+            }
+            extra = dict(base, impressions="50", clicks="1", cost="5000")
+
+            result = write_brand_template(
+                brand="법무법인 오현",
+                template_path=template,
+                output_path=output,
+                run_date="2026-07-01",
+                rows=[base, extra],
+            )
+
+            self.assertEqual(result.written_rows, 1)
+            saved = load_workbook(output, data_only=False)
+            sheet = saved["ohcrime(형사)1일"]
+            self.assertEqual(sheet["B3"].value, 150)
+            self.assertEqual(sheet["C3"].value, 5)
+            self.assertEqual(sheet["E3"].value, 3000)
+            self.assertEqual(sheet["F3"].value, 15000)
+
+    def test_template_writer_single_sheet_mode_writes_category_and_dash_date(self):
+        try:
+            from openpyxl import Workbook, load_workbook
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+
+        with TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            template = temp / "template.xlsx"
+            output = temp / "output.xlsx"
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = "통합"
+            worksheet.append(["일자", "카테고리", "키워드", "노출 수", "클릭수", "총 비용"])
+            worksheet.append([])
+            workbook.save(template)
+
+            result = write_brand_template(
+                brand="법무법인 오현",
+                template_path=template,
+                output_path=output,
+                run_date="2026-07-01",
+                category_mode="single_sheet",
+                rows=[
+                    {
+                        "date": "2026.06.30",
+                        "media": "Naver",
+                        "category": "형사",
+                        "campaign_type": "파워링크",
+                        "keyword": "형사변호사",
+                        "impressions": "100",
+                        "clicks": "4",
+                        "cost": "10000",
+                    }
+                ],
+            )
+
+            self.assertEqual(result.written_rows, 1)
+            saved = load_workbook(output, data_only=False)
+            sheet = saved["통합"]
+            self.assertEqual(sheet["A3"].value, "2026-06-30")
+            self.assertEqual(sheet["B3"].value, "형사")
+            self.assertEqual(sheet["D3"].value, 100)
+            self.assertEqual(sheet["F3"].value, 10000)
+
+    def test_raw_xlsx_upload_uses_auto_column_matching(self):
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+
+        with TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            raw = temp / "naver_oh_raw_20260630_20260630.xlsx"
+            rules = temp / "rules.csv"
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.append(["일별", "URL", "캠페인유형", "PC/모바일 매체", "키워드", "노출 수", "클릭수", "총 비용"])
+            worksheet.append(["2026.06.30", "https://ohcrime.com", "파워링크", "PC", "형사변호사", 100, 4, 10000])
+            workbook.save(raw)
+            rules.write_text(
+                "브랜드,순위,규칙,매칭값,카테고리,신뢰도,사용,메모\n"
+                "법무법인 오현,1,지정 URL,ohcrime.com,형사,1,O,\n",
+                encoding="utf-8-sig",
+            )
+
+            rows = build_upload_rows_from_raw(brand="법무법인 오현", media="Naver", input_path=raw, rules_path=rules)
+
+            self.assertEqual(rows[0]["date"], "20260630")
+            self.assertEqual(rows[0]["category"], "형사")
+            self.assertEqual(rows[0]["impressions"], 100)
+            self.assertEqual(rows[0]["cost"], 10000)
+
     def test_ohyun_allows_report_date_as_run_date_for_manual_upload(self):
         try:
             from openpyxl import Workbook, load_workbook

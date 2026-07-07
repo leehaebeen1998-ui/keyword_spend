@@ -455,12 +455,43 @@ def _is_powercontents_text(value: Any) -> bool:
 
 
 def _read_raw_table(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    if path.suffix.lower() in {".xlsx", ".xlsm"}:
+        return _read_xlsx_table(path)
     encoding = _detect_encoding(path)
     delimiter = "\t" if encoding == "utf-16" else ","
     with path.open("r", encoding=encoding, newline="") as file:
         raw_rows = list(csv.reader(file, delimiter=delimiter))
 
     header_index = _detect_header_index(raw_rows)
+    headers = [str(value).strip() for value in raw_rows[header_index]]
+    rows: list[dict[str, Any]] = []
+    for raw in raw_rows[header_index + 1:]:
+        if not any(str(value).strip() for value in raw):
+            continue
+        rows.append({headers[idx]: raw[idx] if idx < len(raw) else "" for idx in range(len(headers))})
+    return rows, headers
+
+
+def _read_xlsx_table(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise RuntimeError("openpyxl is required for spreadsheet raw upload.") from exc
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    raw_rows: list[list[Any]] = []
+    try:
+        for worksheet in workbook.worksheets:
+            for row in worksheet.iter_rows(values_only=True):
+                values = ["" if value is None else value for value in row]
+                if any(str(value).strip() for value in values):
+                    raw_rows.append(values)
+            if raw_rows:
+                break
+    finally:
+        workbook.close()
+    if not raw_rows:
+        return [], []
+    header_index = _detect_header_index([[str(value) for value in row] for row in raw_rows])
     headers = [str(value).strip() for value in raw_rows[header_index]]
     rows: list[dict[str, Any]] = []
     for raw in raw_rows[header_index + 1:]:
