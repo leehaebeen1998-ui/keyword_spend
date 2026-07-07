@@ -221,7 +221,7 @@ class BrandUploadTests(unittest.TestCase):
             )
 
             self.assertEqual(result.written_rows, 0)
-            self.assertEqual(result.touched_sheets, [])
+            self.assertEqual(result.touched_sheets, ["형(1일)", "형(2일)"])
 
     def test_taeha_category_matching_is_exact_so_hyeong_does_not_enter_military_sheet(self):
         try:
