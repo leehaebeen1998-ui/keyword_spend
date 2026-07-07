@@ -773,6 +773,7 @@ def _downloader_brand_name(app_brand: str, config: dict) -> str:
     aliases = {
         "법무법인 오현": "법무법인 오현 - 데일리",
         "법무법인 태하": "법무법인 태하 - 데일리",
+        "법무법인 일로": "법무법인 일로 - 데일리",
     }
     alias = aliases.get(desired)
     if alias in names:

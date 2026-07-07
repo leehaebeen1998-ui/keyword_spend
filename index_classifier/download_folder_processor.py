@@ -153,12 +153,12 @@ def _ilo_pairs(plans: list[RawFilePlan]) -> list[tuple[RawFilePlan, RawFilePlan]
     groups: dict[str, dict[str, RawFilePlan]] = {}
     for plan in plans:
         name = plan.path.name
-        if "일로 데일리 소진액_ver" not in name:
+        if "일로 데일리 소진액_ver" not in name and not re.search(r"(?:^|_)ilo_\d+_ver[23](?:_|$)", name, re.IGNORECASE):
             continue
         key = _ilo_account_key(plan.path)
         if not key:
             continue
-        version = "ver2" if "ver2" in name else "ver3" if "ver3" in name else ""
+        version = "ver2" if "ver2" in name.lower() else "ver3" if "ver3" in name.lower() else ""
         if not version:
             continue
         groups.setdefault(key, {})[version] = plan
@@ -170,6 +170,9 @@ def _ilo_pairs(plans: list[RawFilePlan]) -> list[tuple[RawFilePlan, RawFilePlan]
 
 
 def _ilo_account_key(path: Path) -> str:
+    match = re.search(r"ilo_(\d+)_ver[23]", path.name, re.IGNORECASE)
+    if match:
+        return match.group(1)
     match = re.search(r",(\d+)(?:\.[^.]+)?$", path.name)
     return match.group(1) if match else ""
 
