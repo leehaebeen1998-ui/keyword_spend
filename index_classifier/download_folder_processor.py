@@ -30,6 +30,7 @@ class FolderProcessResult:
     raw_files: list[RawFilePlan] = field(default_factory=list)
     total_rows: int = 0
     category_counts: dict[str, int] = field(default_factory=dict)
+    date_counts: dict[str, int] = field(default_factory=dict)
     skipped_files: list[Path] = field(default_factory=list)
     duplicate_rows: int = 0
 
@@ -131,17 +132,27 @@ def process_download_folder(
     output = Path(output_path)
     write_upload_rows(output, all_rows)
     counts: dict[str, int] = {}
+    date_counts: dict[str, int] = {}
     for row in all_rows:
         category = str(row.get("category") or "")
         counts[category] = counts.get(category, 0) + 1
+        date_key = _date_token(row.get("date"))
+        if date_key:
+            date_counts[date_key] = date_counts.get(date_key, 0) + 1
     return FolderProcessResult(
         output_path=output,
         raw_files=plans,
         total_rows=len(all_rows),
         category_counts=counts,
+        date_counts=date_counts,
         skipped_files=skipped,
         duplicate_rows=duplicate_rows,
     )
+
+
+def _date_token(value: Any) -> str:
+    text = re.sub(r"\D", "", str(value or ""))
+    return text[:8] if len(text) >= 8 else ""
 
 
 def _uses_ilo_merge(brand: str) -> bool:

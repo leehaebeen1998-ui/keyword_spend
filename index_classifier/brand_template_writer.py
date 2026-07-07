@@ -221,8 +221,9 @@ def write_xlsb_template_with_excel(
 
 
 def _rows_for_target(rows: Iterable[dict[str, Any]], target: SheetTarget) -> list[dict[str, Any]]:
-    result = [row for row in rows if _row_matches_target(row, target) and _has_positive_cost(row)]
+    result = [row for row in rows if _row_matches_target(row, target)]
     result = _merge_rows_for_sheet(result)
+    result = [row for row in result if _has_positive_cost(row)]
     result.sort(key=lambda row: _to_number(_first(row, "cost", "총비용")), reverse=True)
     return result
 

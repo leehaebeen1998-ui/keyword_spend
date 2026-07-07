@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -359,7 +359,7 @@ class UploadProcessorApp(tk.Tk):
         self._run_background(lambda: (self._process_folder(), self._template_update()))
 
     def _run_login_bot(self) -> None:
-        self._run_background(lambda: self._run_external_command("로그인 봇", self.login_command_var.get().strip()))
+        self._run_background(self._launch_login_bot)
 
     def _run_downloader(self) -> None:
         self._run_background(self._launch_downloader)
@@ -393,14 +393,7 @@ class UploadProcessorApp(tk.Tk):
             self._set_default_paths(force_empty_only=True)
             run_date = self.run_date_var.get().strip() or None
             parse_time(self.start_time_var.get().strip() or None)
-            if self.schedule_mode_var.get() == "공휴일 수동":
-                if not self.custom_start_var.get().strip() or not self.custom_end_var.get().strip():
-                    self.download_window_var.set("수동 기간을 입력해 주세요")
-                    self.folder_date_var.set(parse_date(run_date).strftime("%Y-%m-%d"))
-                    return
-                window = custom_download_window(self.custom_start_var.get().strip(), self.custom_end_var.get().strip())
-            else:
-                window = default_download_window(run_date)
+            window = self._download_window()
             folder_date = parse_date(run_date)
             self.folder_date_var.set(folder_date.strftime("%Y-%m-%d"))
             self.download_window_var.set(
@@ -417,6 +410,13 @@ class UploadProcessorApp(tk.Tk):
         except FileNotFoundError as exc:
             self._log(f"[auto] raw file not found. Running downloader first: {exc}")
             result = self._run_downloader_until_raw_available()
+        missing_dates = self._missing_expected_dates(result)
+        if missing_dates:
+            self._log(f"[auto] raw date missing ({', '.join(missing_dates)}). Running downloader first.")
+            result = self._run_downloader_until_raw_available()
+            missing_dates = self._missing_expected_dates(result)
+            if missing_dates:
+                raise FileNotFoundError(f"다운로드 후에도 누락된 날짜 데이터가 있습니다: {', '.join(missing_dates)}")
         if not result.raw_files or result.total_rows <= 0:
             raise ValueError("처리된 데이터가 없습니다. 다운로드 폴더와 실행 기준일을 확인해 주세요.")
         self._log(f"[완료] 업로드 CSV 생성: {result.output_path}")
@@ -426,6 +426,8 @@ class UploadProcessorApp(tk.Tk):
             self._log(f"  중복 의심 행 수: {result.duplicate_rows}")
         for category, count in sorted(result.category_counts.items(), key=lambda item: (-item[1], item[0])):
             self._log(f"  {category}: {count}")
+        if result.date_counts:
+            self._log("  날짜: " + ", ".join(f"{key}={value}" for key, value in sorted(result.date_counts.items())))
 
     def _process_folder_once(self):
         return process_download_folder(
@@ -441,6 +443,9 @@ class UploadProcessorApp(tk.Tk):
         if not command:
             raise FileNotFoundError("raw file not found and downloader command is empty.")
         self._run_external_command("downloader", command)
+
+    def _launch_login_bot(self) -> None:
+        self._launch_external_command("로그인 봇", self.login_command_var.get().strip())
 
     def _launch_downloader(self) -> None:
         self._prepare_bundled_downloader()
@@ -463,6 +468,14 @@ class UploadProcessorApp(tk.Tk):
                     last_log = now
                 time.sleep(5)
                 continue
+            missing_dates = self._missing_expected_dates(result)
+            if missing_dates:
+                now = time.monotonic()
+                if now - last_log >= 15:
+                    self._log(f"[auto] Waiting for missing raw dates: {', '.join(missing_dates)}")
+                    last_log = now
+                time.sleep(5)
+                continue
             self._log("[auto] Raw files found after downloader launch.")
             return result
         raise TimeoutError("downloader raw files were not found within 30 minutes.")
@@ -482,6 +495,14 @@ class UploadProcessorApp(tk.Tk):
             return
         if download_root:
             data["save_root_path"] = download_root
+        try:
+            window = self._download_window()
+            data["last_run_period"] = {
+                "start": window.start_date.strftime("%Y-%m-%d"),
+                "end": window.end_date.strftime("%Y-%m-%d"),
+            }
+        except Exception as exc:
+            self._log(f"[warning] downloader period prepare failed: {exc}")
         downloader_brand = _downloader_brand_name(self.brand_var.get().strip(), data)
         if downloader_brand:
             data["active_brand"] = downloader_brand
@@ -494,6 +515,30 @@ class UploadProcessorApp(tk.Tk):
                     break
         config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         self._log(f"[ready] downloader save folder: {download_root}")
+
+    def _download_window(self):
+        run_date = self.run_date_var.get().strip() or None
+        if self.schedule_mode_var.get() == "공휴일 수동":
+            if not self.custom_start_var.get().strip() or not self.custom_end_var.get().strip():
+                self.download_window_var.set("수동 기간을 입력해 주세요")
+                self.folder_date_var.set(parse_date(run_date).strftime("%Y-%m-%d"))
+                raise ValueError("수동 기간을 입력해 주세요.")
+            return custom_download_window(self.custom_start_var.get().strip(), self.custom_end_var.get().strip())
+        return default_download_window(run_date)
+
+    def _expected_download_dates(self) -> list[str]:
+        window = self._download_window()
+        current = window.start_date
+        result: list[str] = []
+        while current <= window.end_date:
+            result.append(current.strftime("%Y%m%d"))
+            current += timedelta(days=1)
+        return result
+
+    def _missing_expected_dates(self, result) -> list[str]:
+        expected = self._expected_download_dates()
+        available = set(getattr(result, "date_counts", {}) or {})
+        return [date_key for date_key in expected if date_key not in available]
 
     def _template_update(self) -> None:
         self._validate_file_inputs(require_template=True)
