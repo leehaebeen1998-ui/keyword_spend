@@ -330,13 +330,21 @@ def _build_generic_row(row: dict[str, Any], *, media: str, path: Path, rules: di
 
 
 def _field(row: dict[str, Any], fields: dict[str, str], name: str, *fallbacks: str) -> Any:
+    normalized = {_normalize_header(key): key for key in row}
     configured = fields.get(name)
-    if configured and configured in row:
-        return row.get(configured, "")
+    if configured:
+        actual = normalized.get(_normalize_header(configured))
+        if actual is not None:
+            return row.get(actual, "")
     for fallback in fallbacks:
-        if fallback in row:
-            return row.get(fallback, "")
+        actual = normalized.get(_normalize_header(fallback))
+        if actual is not None:
+            return row.get(actual, "")
     return ""
+
+
+def _normalize_header(value: Any) -> str:
+    return re.sub(r"[\s_()/%\[\]\-]+", "", str(value or "").casefold())
 
 
 def _keyword_for_upload(*, keyword: Any, campaign: Any, campaign_type: Any) -> Any:

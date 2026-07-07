@@ -43,6 +43,7 @@ class UploadProcessorApp(tk.Tk):
         self.upload_csv_var = tk.StringVar()
         self.template_path_var = tk.StringVar()
         self.output_path_var = tk.StringVar()
+        self.template_update_mode_var = tk.StringVar(value="삭제 후 신규")
         self.run_date_var = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
         self.login_command_var = tk.StringVar()
         self.downloader_command_var = tk.StringVar()
@@ -98,6 +99,15 @@ class UploadProcessorApp(tk.Tk):
         self._path_row(outer, row, "템플릿", self.template_path_var, self._choose_template)
         row += 1
         self._path_row(outer, row, "결과 파일", self.output_path_var, self._choose_output_file)
+        row += 1
+        ttk.Label(outer, text="반영 방식").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Combobox(
+            outer,
+            textvariable=self.template_update_mode_var,
+            values=["삭제 후 신규", "기존 시트 누적"],
+            width=18,
+            state="readonly",
+        ).grid(row=row, column=1, sticky="w", pady=4)
         row += 1
         ttk.Label(outer, text="실행 기준일").grid(row=row, column=0, sticky="w", pady=4)
         ttk.Entry(outer, textvariable=self.run_date_var).grid(row=row, column=1, sticky="ew", pady=4)
@@ -485,6 +495,7 @@ class UploadProcessorApp(tk.Tk):
             output_path=self.output_path_var.get().strip(),
             rows=rows,
             run_date=self.run_date_var.get().strip() or None,
+            update_mode=_template_update_mode(self.template_update_mode_var.get()),
         )
         if result.written_rows <= 0:
             raise ValueError("템플릿에 반영된 행이 없습니다. 실행 기준일, 시트명, 카테고리 규칙을 확인해 주세요.")
@@ -797,6 +808,10 @@ def _normalize_external_command(command: str) -> str:
     if text.endswith(" 실행"):
         text = text[: -len(" 실행")].strip()
     return text
+
+
+def _template_update_mode(value: str) -> str:
+    return "append" if "누적" in str(value or "") else "replace"
 
 
 def main() -> None:

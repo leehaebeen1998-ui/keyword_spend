@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, replace
@@ -56,6 +57,7 @@ def write_brand_template(
     output_path: str | Path,
     rows: list[dict[str, Any]],
     run_date: str | date | datetime | None = None,
+    update_mode: str = "replace",
 ) -> TemplateWriteResult:
     rule = _brand_rule_for_upload(brand=brand, rows=rows)
     template = Path(template_path)
@@ -63,9 +65,9 @@ def write_brand_template(
     suffix = template.suffix.lower()
 
     if suffix == ".xlsx":
-        return write_xlsx_template(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date)
+        return write_xlsx_template(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode)
     if suffix == ".xlsb":
-        return write_xlsb_template_with_excel(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date)
+        return write_xlsb_template_with_excel(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode)
     raise ValueError(f"Unsupported template type: {template.suffix}")
 
 
@@ -97,6 +99,7 @@ def write_xlsx_template(
     output_path: str | Path,
     rows: list[dict[str, Any]],
     run_date: str | date | datetime | None = None,
+    update_mode: str = "replace",
 ) -> TemplateWriteResult:
     try:
         from copy import copy
@@ -123,13 +126,15 @@ def write_xlsx_template(
 
         header_map = _header_map_openpyxl(worksheet, header_row)
         data_start = header_row + 2
+        write_start = _append_start_row_openpyxl(worksheet, data_start, header_map) if update_mode == "append" else data_start
         template_row = data_start if worksheet.max_row >= data_start else header_row + 1
-        _clear_openpyxl_data(worksheet, data_start, header_map.values())
+        if update_mode != "append":
+            _clear_openpyxl_data(worksheet, data_start, header_map.values())
         if not target_rows:
             touched.append(sheet_name)
             continue
 
-        for row_index, row in enumerate(target_rows, start=data_start):
+        for row_index, row in enumerate(target_rows, start=write_start):
             if row_index > worksheet.max_row:
                 worksheet.append([])
             for field, col_idx in header_map.items():
@@ -161,6 +166,7 @@ def write_xlsb_template_with_excel(
     output_path: str | Path,
     rows: list[dict[str, Any]],
     run_date: str | date | datetime | None = None,
+    update_mode: str = "replace",
 ) -> TemplateWriteResult:
     current = parse_run_date(run_date)
     targets = [
@@ -180,6 +186,7 @@ def write_xlsb_template_with_excel(
         "output_path": os.fspath(output),
         "targets": targets,
         "headers": HEADER_ALIASES,
+        "update_mode": update_mode,
     }
 
     with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as file:
@@ -215,7 +222,7 @@ def write_xlsb_template_with_excel(
 
 def _rows_for_target(rows: Iterable[dict[str, Any]], target: SheetTarget) -> list[dict[str, Any]]:
     result = [row for row in rows if _row_matches_target(row, target) and _has_positive_cost(row)]
-    result = _dedupe_rows_for_sheet(result)
+    result = _merge_rows_for_sheet(result)
     result.sort(key=lambda row: _to_number(_first(row, "cost", "총비용")), reverse=True)
     return result
 
@@ -230,6 +237,57 @@ def _dedupe_rows_for_sheet(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         result.append(row)
     return result
+
+
+def _merge_rows_for_sheet(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    for row in rows:
+        key = _sheet_merge_key(row)
+        if key not in merged:
+            merged[key] = dict(row)
+            continue
+        _add_metrics(merged[key], row)
+    return [_recalculate_metrics(row) for row in merged.values()]
+
+
+def _sheet_merge_key(row: dict[str, Any]) -> tuple[str, ...]:
+    return (
+        _normalize(str(_first(row, "date", "날짜", "일자") or "")),
+        _normalize(str(_first(row, "media", "매체") or "")),
+        _normalize(str(_first(row, "category", "카테고리") or "")),
+        _normalize(str(_first(row, "campaign_type", "캠페인유형") or "")),
+        _normalize(str(_first(row, "device", "PC/모바일") or "")),
+        _normalize(str(_first(row, "keyword", "키워드", "검색어") or "")),
+    )
+
+
+def _add_metrics(base: dict[str, Any], extra: dict[str, Any]) -> None:
+    base["rank"] = _weighted_rank(base, extra)
+    for field in ("impressions", "clicks", "cost", "conversions"):
+        base[field] = _to_number(_first(base, field, *_aliases_for_field(field))) + _to_number(_first(extra, field, *_aliases_for_field(field)))
+
+
+def _weighted_rank(base: dict[str, Any], extra: dict[str, Any]) -> float:
+    base_rank = _to_number(_first(base, "rank", *_aliases_for_field("rank")))
+    extra_rank = _to_number(_first(extra, "rank", *_aliases_for_field("rank")))
+    base_impressions = _to_number(_first(base, "impressions", *_aliases_for_field("impressions")))
+    extra_impressions = _to_number(_first(extra, "impressions", *_aliases_for_field("impressions")))
+    total = base_impressions + extra_impressions
+    if total:
+        return ((base_rank * base_impressions) + (extra_rank * extra_impressions)) / total
+    return base_rank or extra_rank
+
+
+def _recalculate_metrics(row: dict[str, Any]) -> dict[str, Any]:
+    clicks = _to_number(_first(row, "clicks", *_aliases_for_field("clicks")))
+    impressions = _to_number(_first(row, "impressions", *_aliases_for_field("impressions")))
+    cost = _to_number(_first(row, "cost", *_aliases_for_field("cost")))
+    conversions = _to_number(_first(row, "conversions", *_aliases_for_field("conversions")))
+    row["ctr"] = clicks / impressions if impressions else 0
+    row["cpc"] = cost / clicks if clicks else 0
+    row["conversion_rate"] = conversions / clicks if clicks else 0
+    row["cost_per_conversion"] = cost / conversions if conversions else 0
+    return row
 
 
 def _sheet_dedupe_key(row: dict[str, Any]) -> tuple[str, ...]:
@@ -336,6 +394,17 @@ def _clear_openpyxl_data(worksheet, start_row: int, columns: Iterable[int]) -> N
             worksheet.cell(row_idx, col_idx).value = None
 
 
+def _append_start_row_openpyxl(worksheet, start_row: int, header_map: dict[str, int]) -> int:
+    key_columns = [header_map[field] for field in ("keyword", "cost") if field in header_map]
+    if not key_columns:
+        key_columns = list(header_map.values())
+    last_data_row = start_row - 1
+    for row_idx in range(start_row, worksheet.max_row + 1):
+        if any(worksheet.cell(row_idx, col_idx).value not in (None, "") for col_idx in key_columns):
+            last_data_row = row_idx
+    return last_data_row + 1
+
+
 def _value_for_field(row: dict[str, Any], field: str) -> Any:
     if field in {"impressions", "clicks", "cost", "conversions", "rank"}:
         return _to_number(_first(row, field, *_aliases_for_field(field)))
@@ -408,6 +477,10 @@ def _parse_row_date(value: Any) -> date | None:
             return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
+    match = re.search(r"(\d{4})[.\-/년 ]+(\d{1,2})[.\-/월 ]+(\d{1,2})", text)
+    if match:
+        y, m, d = match.groups()
+        return date(int(y), int(m), int(d))
     return None
 
 
@@ -588,6 +661,24 @@ try {
       }
     }
     $dataStart = $headerRow + 2
+    $writeStart = $dataStart
+    if ($payload.update_mode -eq 'append') {
+      $keyCols = @()
+      foreach ($keyField in @('keyword', 'cost')) {
+        if ($fieldCols.ContainsKey($keyField)) { $keyCols += [int]$fieldCols[$keyField] }
+      }
+      if ($keyCols.Count -eq 0) { $keyCols = @($fieldCols.Values | ForEach-Object { [int]$_ }) }
+      $lastDataRow = $dataStart - 1
+      for ($r = $dataStart; $r -le $lastUsedRow; $r++) {
+        foreach ($col in $keyCols) {
+          if ([string]$ws.Cells.Item($r, [int]$col).Text -ne '') {
+            $lastDataRow = $r
+            break
+          }
+        }
+      }
+      $writeStart = $lastDataRow + 1
+    }
     $rowCount = @($target.rows).Count
     $lastClearRow = [Math]::Max($lastUsedRow, $dataStart + $rowCount + 50)
     if ($rowCount -gt 0) {
@@ -596,14 +687,16 @@ try {
         $firstFormatCol = $formatCols[0]
         $lastFormatCol = $formatCols[$formatCols.Count - 1]
         $sourceFormat = $ws.Range($ws.Cells.Item($dataStart, $firstFormatCol), $ws.Cells.Item($dataStart, $lastFormatCol))
-        $targetFormat = $ws.Range($ws.Cells.Item($dataStart, $firstFormatCol), $ws.Cells.Item([Math]::Max($lastClearRow, $dataStart + $rowCount - 1), $lastFormatCol))
+        $targetFormat = $ws.Range($ws.Cells.Item($writeStart, $firstFormatCol), $ws.Cells.Item([Math]::Max($lastClearRow, $writeStart + $rowCount - 1), $lastFormatCol))
         $sourceFormat.Copy() | Out-Null
         $targetFormat.PasteSpecial(-4122) | Out-Null
         try { $excel.CutCopyMode = 0 } catch {}
       }
     }
-    foreach ($col in $fieldCols.Values) {
-      $ws.Range($ws.Cells.Item($dataStart, [int]$col), $ws.Cells.Item($lastClearRow, [int]$col)).ClearContents() | Out-Null
+    if ($payload.update_mode -ne 'append') {
+      foreach ($col in $fieldCols.Values) {
+        $ws.Range($ws.Cells.Item($dataStart, [int]$col), $ws.Cells.Item($lastClearRow, [int]$col)).ClearContents() | Out-Null
+      }
     }
     if ($rowCount -eq 0) { continue }
     foreach ($field in $fieldCols.Keys) {
@@ -614,7 +707,7 @@ try {
         if (($field -eq 'conversions' -or $field -eq 'conversion_rate' -or $field -eq 'cost_per_conversion') -and $null -eq $value) { $value = 0 }
         $values[$i, 0] = $value
       }
-      $writeRange = $ws.Range($ws.Cells.Item($dataStart, $col), $ws.Cells.Item($dataStart + $rowCount - 1, $col))
+      $writeRange = $ws.Range($ws.Cells.Item($writeStart, $col), $ws.Cells.Item($writeStart + $rowCount - 1, $col))
       $writeRange.Value2 = $values
       if ($field -eq 'conversions') { $writeRange.NumberFormat = '0;-0;-' }
       if ($field -eq 'conversion_rate') { $writeRange.NumberFormat = '0.00%;-0.00%;-' }
