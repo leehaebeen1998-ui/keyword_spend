@@ -21,22 +21,43 @@ class BrandUploadTests(unittest.TestCase):
         self.assertEqual(str(report_date_for_offset("2026-07-01", 1)), "2026-06-30")
         self.assertEqual(offset_for_report_date("2026-07-01", "2026-06-30"), 1)
 
-    def test_ohyun_fixed_targets_match_calendar_day_sheets(self):
+    def test_ohyun_fixed_targets_use_fixed_label_on_normal_weekdays(self):
+        # 2026-07-01은 수요일(평일, 캐치업 불필요)이다. 오현은 태하와 마찬가지로
+        # 평일에는 시트명이 달력 날짜와 무관하게 항상 고정 "1일"이어야 한다.
         targets = build_sheet_targets(DEFAULT_BRAND_RULES["법무법인 오현"], "2026-07-01")
 
-        self.assertIn("ohcrime(형사)30일", [target.sheet_name for target in targets])
-        self.assertIn("파컨(교통사고)30일", [target.sheet_name for target in targets])
-        self.assertIn("파컨(이혼)30일", [target.sheet_name for target in targets])
-        self.assertIn("파컨(경제범죄)30일", [target.sheet_name for target in targets])
+        self.assertIn("ohcrime(형사)1일", [target.sheet_name for target in targets])
+        self.assertIn("파컨(교통사고)1일", [target.sheet_name for target in targets])
+        self.assertIn("파컨(이혼)1일", [target.sheet_name for target in targets])
+        self.assertIn("파컨(경제범죄)1일", [target.sheet_name for target in targets])
         self.assertTrue(all(str(target.report_date) == "2026-06-30" for target in targets))
         self.assertTrue(all(target.date_formula == "=TODAY()-1" for target in targets))
 
-    def test_ohyun_sheet_day_number_tracks_report_date_not_fixed_at_one(self):
+    def test_ohyun_sheet_name_stays_fixed_at_one_regardless_of_calendar_day(self):
+        # 평일이면(캐치업 대상 아님) 실제 달력상의 날짜(7일, 2일 등)와 무관하게
+        # 시트명은 항상 "1일"로 고정된다. 2026-07-08(수)과 2026-07-02(목) 둘 다
+        # 평일이므로 동일하게 "1일" 시트를 가리켜야 한다.
         targets_jul8 = build_sheet_targets(DEFAULT_BRAND_RULES["법무법인 오현"], "2026-07-08")
-        self.assertIn("ohcrime(형사)7일", [target.sheet_name for target in targets_jul8])
+        self.assertIn("ohcrime(형사)1일", [target.sheet_name for target in targets_jul8])
+        self.assertNotIn("ohcrime(형사)7일", [target.sheet_name for target in targets_jul8])
 
         targets_jul2 = build_sheet_targets(DEFAULT_BRAND_RULES["법무법인 오현"], "2026-07-02")
         self.assertIn("ohcrime(형사)1일", [target.sheet_name for target in targets_jul2])
+
+    def test_ohyun_monday_catchup_uses_calendar_day_sheets_for_each_weekend_date(self):
+        # 2026-07-06은 월요일이라 주말(금 7/3, 토 7/4, 일 7/5) 캐치업이 필요하다.
+        # "1일" 하나로는 세 날짜를 구분할 수 없으므로, 이 경우에만 각 날짜의 실제
+        # 달력 일자를 시트명으로 사용해야 한다(태하의 오프셋 라벨과는 다름).
+        targets = build_sheet_targets(DEFAULT_BRAND_RULES["법무법인 오현"], "2026-07-06")
+        sheet_names = [target.sheet_name for target in targets]
+
+        self.assertIn("ohcrime(형사)5일", sheet_names)  # 일요일 7/5
+        self.assertIn("ohcrime(형사)4일", sheet_names)  # 토요일 7/4
+        self.assertIn("ohcrime(형사)3일", sheet_names)  # 금요일 7/3
+        self.assertNotIn("ohcrime(형사)1일", sheet_names)
+
+        report_dates = {str(target.report_date) for target in targets if target.category == "ohcrime(형사)"}
+        self.assertEqual(report_dates, {"2026-07-05", "2026-07-04", "2026-07-03"})
 
     def test_taeha_rolling_targets_include_naver_and_google(self):
         targets = build_sheet_targets(DEFAULT_BRAND_RULES["법무법인 태하"], "2026-07-01")
@@ -67,7 +88,7 @@ class BrandUploadTests(unittest.TestCase):
 
             workbook = Workbook()
             worksheet = workbook.active
-            worksheet.title = "ohcrime(형사)30일"
+            worksheet.title = "ohcrime(형사)1일"
             worksheet.append([])
             worksheet.append(["", "키워드별 소진액 보고서_http://www.ohcrime.com_형사", "", "", "", "", "", "", "=TODAY()-1"])
             worksheet.append([])
@@ -98,9 +119,9 @@ class BrandUploadTests(unittest.TestCase):
             )
 
             self.assertEqual(result.written_rows, 1)
-            self.assertEqual(result.touched_sheets, ["ohcrime(형사)30일"])
+            self.assertEqual(result.touched_sheets, ["ohcrime(형사)1일"])
             saved = load_workbook(output, data_only=False)
-            sheet = saved["ohcrime(형사)30일"]
+            sheet = saved["ohcrime(형사)1일"]
             self.assertEqual(sheet["A6"].value, "파워링크")
             self.assertEqual(sheet["C6"].value, "형사변호사")
             self.assertEqual(sheet["F6"].value, 0.05)
@@ -120,7 +141,7 @@ class BrandUploadTests(unittest.TestCase):
             output = temp / "output.xlsx"
             workbook = Workbook()
             workbook.remove(workbook.active)
-            for sheet_name in ("교통사고30일", "파컨(교통사고)30일"):
+            for sheet_name in ("교통사고1일", "파컨(교통사고)1일"):
                 worksheet = workbook.create_sheet(sheet_name)
                 worksheet.append([])
                 worksheet.append([])
@@ -143,8 +164,8 @@ class BrandUploadTests(unittest.TestCase):
 
             self.assertEqual(result.written_rows, 2)
             saved = load_workbook(output, data_only=False)
-            self.assertEqual(saved["교통사고30일"]["C6"].value, "교통 링크")
-            self.assertEqual(saved["파컨(교통사고)30일"]["C6"].value, "교통 컨텐츠")
+            self.assertEqual(saved["교통사고1일"]["C6"].value, "교통 링크")
+            self.assertEqual(saved["파컨(교통사고)1일"]["C6"].value, "교통 컨텐츠")
 
     def test_template_writer_forces_blank_conversion_metrics_to_zero(self):
         try:
@@ -274,7 +295,7 @@ class BrandUploadTests(unittest.TestCase):
             output = temp / "output.xlsx"
             workbook = Workbook()
             workbook.remove(workbook.active)
-            for sheet_name in ("ohcrime(형사)30일", "군형사30일"):
+            for sheet_name in ("ohcrime(형사)1일", "군형사1일"):
                 worksheet = workbook.create_sheet(sheet_name)
                 worksheet.append(["키워드", "총비용"])
                 worksheet.append([])
@@ -290,8 +311,8 @@ class BrandUploadTests(unittest.TestCase):
 
             self.assertEqual(result.written_rows, 1)
             saved = load_workbook(output, data_only=False)
-            self.assertEqual(saved["ohcrime(형사)30일"]["A3"].value, "형사변호사")
-            self.assertIsNone(saved["군형사30일"]["A3"].value)
+            self.assertEqual(saved["ohcrime(형사)1일"]["A3"].value, "형사변호사")
+            self.assertIsNone(saved["군형사1일"]["A3"].value)
 
     def test_template_writer_dedupes_rows_within_each_sheet(self):
         try:
@@ -305,7 +326,7 @@ class BrandUploadTests(unittest.TestCase):
             output = temp / "output.xlsx"
             workbook = Workbook()
             worksheet = workbook.active
-            worksheet.title = "ohcrime(형사)30일"
+            worksheet.title = "ohcrime(형사)1일"
             worksheet.append(["키워드", "노출수", "클릭수", "클릭률", "클릭비용", "총비용"])
             worksheet.append([])
             workbook.save(template)
@@ -334,8 +355,8 @@ class BrandUploadTests(unittest.TestCase):
 
             self.assertEqual(result.written_rows, 1)
             saved = load_workbook(output, data_only=False)
-            self.assertEqual(saved["ohcrime(형사)30일"]["A3"].value, "형사변호사")
-            self.assertIsNone(saved["ohcrime(형사)30일"]["A4"].value)
+            self.assertEqual(saved["ohcrime(형사)1일"]["A3"].value, "형사변호사")
+            self.assertIsNone(saved["ohcrime(형사)1일"]["A4"].value)
 
     def test_template_writer_merges_duplicate_keywords_within_category(self):
         try:
@@ -349,7 +370,7 @@ class BrandUploadTests(unittest.TestCase):
             output = temp / "output.xlsx"
             workbook = Workbook()
             worksheet = workbook.active
-            worksheet.title = "ohcrime(형사)30일"
+            worksheet.title = "ohcrime(형사)1일"
             worksheet.append(["키워드", "노출수", "클릭수", "클릭률", "클릭비용", "총비용"])
             worksheet.append([])
             workbook.save(template)
@@ -377,7 +398,7 @@ class BrandUploadTests(unittest.TestCase):
 
             self.assertEqual(result.written_rows, 1)
             saved = load_workbook(output, data_only=False)
-            sheet = saved["ohcrime(형사)30일"]
+            sheet = saved["ohcrime(형사)1일"]
             self.assertEqual(sheet["B3"].value, 150)
             self.assertEqual(sheet["C3"].value, 5)
             self.assertEqual(sheet["E3"].value, 3000)

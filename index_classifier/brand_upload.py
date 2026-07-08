@@ -136,6 +136,32 @@ def build_sheet_targets(
     targets: list[SheetTarget] = []
 
     if rule.mode == "fixed_today_offset":
+        # 평일에는 태하와 동일하게 시트명이 고정 라벨("1일")이고, 주말 캐치업
+        # (월요일 실행 시 금/토/일 3일치)만 실제 달력 날짜로 시트명이 갈린다.
+        # 하나의 "1일" 시트로는 캐치업 대상 여러 날짜를 구분할 수 없기 때문이다.
+        catchup_offsets = weekend_catchup_offsets(current) if include_weekend_catchup else (rule.today_offset,)
+        needs_catchup = len(catchup_offsets) > 1
+
+        if needs_catchup:
+            for offset in catchup_offsets:
+                report_date = report_date_for_offset(current, offset)
+                for category in rule.categories:
+                    sheet_prefix = rule.sheet_prefixes.get(category, category)
+                    campaign_kind = None
+                    if rule.brand == "법무법인 오현":
+                        campaign_kind = "power_contents" if category.startswith("파컨(") else "power_link"
+                    targets.append(
+                        SheetTarget(
+                            brand=rule.brand,
+                            category=category,
+                            report_date=report_date,
+                            sheet_name=f"{sheet_prefix}{report_date.day}일",
+                            date_formula=None,
+                            campaign_kind=campaign_kind,
+                        )
+                    )
+            return targets
+
         report_date = report_date_for_offset(current, rule.today_offset)
         formula = f"=TODAY()-{rule.today_offset}" if rule.use_today_formula else None
         for category in rule.categories:
@@ -148,7 +174,7 @@ def build_sheet_targets(
                     brand=rule.brand,
                     category=category,
                     report_date=report_date,
-                    sheet_name=f"{sheet_prefix}{report_date.day}일",
+                    sheet_name=f"{sheet_prefix}1일",
                     date_formula=formula,
                     campaign_kind=campaign_kind,
                 )

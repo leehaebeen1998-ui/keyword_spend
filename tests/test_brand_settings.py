@@ -105,8 +105,10 @@ class RuleForProfileTests(unittest.TestCase):
 
         targets = build_sheet_targets(rule, "2026-07-08")
         sheet_names = {target.sheet_name for target in targets}
-        # run_date=2026-07-08, today_offset=1 -> report_date=2026-07-07 -> day=7
-        self.assertIn("형사7일", sheet_names)
+        # 2026-07-08은 수요일(평일, 캐치업 불필요)이므로 오현과 동일하게
+        # 시트명은 달력 날짜와 무관하게 고정 "1일"이어야 한다.
+        self.assertIn("형사1일", sheet_names)
+        self.assertNotIn("형사7일", sheet_names)
 
     def test_new_brand_single_sheet_without_categories_returns_all_marker(self):
         profile = BrandProfile(
