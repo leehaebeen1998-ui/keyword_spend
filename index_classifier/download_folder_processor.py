@@ -87,6 +87,7 @@ def process_download_folder(
     output_path: str | Path,
     media_filter: str | None = None,
     folder_date: str | None = None,
+    exchange_rate: float | None = None,
 ) -> FolderProcessResult:
     date_token = parse_date(folder_date).strftime("%Y%m%d") if folder_date else None
     plans, skipped = discover_raw_files(download_folder, media_filter=media_filter, folder_date=date_token)
@@ -109,6 +110,7 @@ def process_download_folder(
                     keyword_path=keyword_plan.path,
                     search_path=search_plan.path,
                     rules_path=rules_path,
+                    exchange_rate=exchange_rate,
                 )
             )
 
@@ -121,6 +123,7 @@ def process_download_folder(
                 media=plan.media,
                 input_path=plan.path,
                 rules_path=rules_path,
+                exchange_rate=exchange_rate,
             )
         )
 

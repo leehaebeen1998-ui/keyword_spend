@@ -13,6 +13,7 @@ from index_classifier.brand_upload import (
 )
 from index_classifier.brand_template_writer import write_brand_template
 from index_classifier.raw_upload_builder import build_upload_rows_from_raw, sort_upload_rows
+from index_classifier.exchange_rate import needs_conversion
 
 
 class BrandUploadTests(unittest.TestCase):
@@ -688,6 +689,71 @@ class BrandUploadTests(unittest.TestCase):
         ])
 
         self.assertEqual([row["keyword"] for row in rows], ["high", "mid", "low"])
+
+    def test_usd_currency_rows_are_converted_when_exchange_rate_provided(self):
+        with TemporaryDirectory() as temp_dir:
+            rules = Path(temp_dir) / "rules.csv"
+            rules.write_text(
+                "브랜드,순위,규칙,매칭값,카테고리,신뢰도,사용,메모\n"
+                "법무법인 태하,2,캠페인명,성범죄,성범죄,1,O,\n",
+                encoding="utf-8-sig",
+            )
+            raw = Path(temp_dir) / "google_sa_법무법인태하_01_형사_raw_20260630_20260630.csv"
+            raw.write_text(
+                "일간 키워드 보고\n"
+                "2026년 6월 30일 - 2026년 6월 30일\n"
+                "일\t캠페인\t캠페인 유형\t기기\t검색 키워드\t노출수\t클릭수\t클릭률(CTR)\t통화 코드\t평균 비용\t비용\t전환\t모든 전환당 비용\t전환율\n"
+                "2026-06-30\t[SA] 서울_확장_성범죄_0317\t검색\t휴대전화\t성범죄변호사\t100\t10\t10.00%\tUSD\t2\t20\t2\t10\t20.00%\n",
+                encoding="utf-16",
+            )
+
+            rows = build_upload_rows_from_raw(
+                brand="법무법인 태하",
+                media="Google SA",
+                input_path=raw,
+                rules_path=rules,
+                exchange_rate=1350.0,
+            )
+
+            self.assertEqual(rows[0]["cost"], 27000)
+            self.assertEqual(rows[0]["cost_per_conversion"], 13500)
+            self.assertAlmostEqual(rows[0]["cpc"], 2700.0)
+
+    def test_krw_currency_rows_are_not_converted_even_with_exchange_rate(self):
+        with TemporaryDirectory() as temp_dir:
+            rules = Path(temp_dir) / "rules.csv"
+            rules.write_text(
+                "브랜드,순위,규칙,매칭값,카테고리,신뢰도,사용,메모\n"
+                "법무법인 태하,2,캠페인명,성범죄,성범죄,1,O,\n",
+                encoding="utf-8-sig",
+            )
+            raw = Path(temp_dir) / "google_sa_법무법인태하_01_형사_raw_20260630_20260630.csv"
+            raw.write_text(
+                "일간 키워드 보고\n"
+                "2026년 6월 30일 - 2026년 6월 30일\n"
+                "일\t캠페인\t캠페인 유형\t기기\t검색 키워드\t노출수\t클릭수\t클릭률(CTR)\t통화 코드\t평균 비용\t비용\t전환\t모든 전환당 비용\t전환율\n"
+                "2026-06-30\t[SA] 서울_확장_성범죄_0317\t검색\t휴대전화\t성범죄변호사\t100\t10\t10.00%\tKRW\t2\t20\t2\t10\t20.00%\n",
+                encoding="utf-16",
+            )
+
+            rows = build_upload_rows_from_raw(
+                brand="법무법인 태하",
+                media="Google SA",
+                input_path=raw,
+                rules_path=rules,
+                exchange_rate=1350.0,
+            )
+
+            self.assertEqual(rows[0]["cost"], 20)
+            self.assertEqual(rows[0]["cost_per_conversion"], 10)
+
+    def test_needs_conversion_treats_krw_variants_as_no_conversion(self):
+        self.assertFalse(needs_conversion("KRW"))
+        self.assertFalse(needs_conversion("krw"))
+        self.assertFalse(needs_conversion(""))
+        self.assertFalse(needs_conversion(None))
+        self.assertTrue(needs_conversion("USD"))
+        self.assertTrue(needs_conversion("usd"))
 
 
 if __name__ == "__main__":

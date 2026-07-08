@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from index_classifier.download_folder_processor import process_download_folder
 from index_classifier.brand_template_writer import write_brand_template
+from index_classifier.exchange_rate import ExchangeRateError, fetch_usd_krw_rate
 from index_classifier.google_sheets_uploader import upload_csv_to_google_sheet
 from index_classifier.schedule_rules import custom_download_window, default_download_window, parse_date, parse_time
 from index_classifier.brand_settings import (
@@ -64,6 +65,8 @@ class UploadProcessorApp(tk.Tk):
         self.folder_date_var = tk.StringVar()
         self.download_window_var = tk.StringVar()
         self.status_var = tk.StringVar(value="대기")
+        self.exchange_rate_status_var = tk.StringVar(value="환율 미적용 (USD 원본 그대로 사용)")
+        self._exchange_rate: float | None = None
         self._running = False
         self._operation_started_at: float | None = None
         self._syncing_default_paths = False
@@ -132,6 +135,14 @@ class UploadProcessorApp(tk.Tk):
         ttk.Label(outer, text="실행 기준일").grid(row=row, column=0, sticky="w", pady=4)
         ttk.Entry(outer, textvariable=self.run_date_var).grid(row=row, column=1, sticky="ew", pady=4)
         ttk.Label(outer, text="비우면 오늘").grid(row=row, column=2, sticky="w", padx=(8, 0), pady=4)
+
+        row += 1
+        exchange = ttk.Frame(outer)
+        exchange.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 4))
+        ttk.Label(exchange, text="환율(USD\u2192KRW)").pack(side="left")
+        ttk.Label(exchange, textvariable=self.exchange_rate_status_var).pack(side="left", padx=(8, 8))
+        ttk.Button(exchange, text="환율 적용", command=self._run_apply_exchange_rate).pack(side="left")
+        ttk.Button(exchange, text="해제", command=self._clear_exchange_rate).pack(side="left", padx=(6, 0))
 
         row += 1
         integration = ttk.LabelFrame(outer, text="로그인 봇 / 다운로더 호출", padding=8)
@@ -427,6 +438,47 @@ class UploadProcessorApp(tk.Tk):
     def _run_check_schedule(self) -> None:
         self._run_background(self._check_windows_schedule)
 
+    def _run_apply_exchange_rate(self) -> None:
+        if self._running:
+            self._log("[안내] 이미 실행 중입니다. 완료 후 다시 눌러 주세요.")
+            return
+        self.exchange_rate_status_var.set("환율 조회 중...")
+
+        def _fetch() -> None:
+            try:
+                rate = fetch_usd_krw_rate()
+            except ExchangeRateError as exc:
+                self._log(f"[환율] 자동 조회 실패: {exc}")
+                self.after(0, self._prompt_manual_exchange_rate)
+                return
+            self.after(0, lambda: self._set_exchange_rate(rate, source="자동 조회"))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _prompt_manual_exchange_rate(self) -> None:
+        value = simpledialog.askfloat(
+            "환율 직접 입력",
+            "자동 조회에 실패했습니다. 오늘 USD \u2192 KRW 환율을 직접 입력해 주세요.\n예: 1380.5",
+            parent=self,
+            minvalue=0.0,
+        )
+        if value is None:
+            self.exchange_rate_status_var.set("환율 미적용 (USD 원본 그대로 사용)")
+            self._log("[환율] 수동 입력이 취소되어 환율 변환을 적용하지 않습니다.")
+            return
+        self._set_exchange_rate(value, source="수동 입력")
+
+    def _set_exchange_rate(self, rate: float, *, source: str) -> None:
+        self._exchange_rate = rate
+        today = date.today().strftime("%Y-%m-%d")
+        self.exchange_rate_status_var.set(f"적용: 1USD = {rate:,.2f}원 ({source}, {today})")
+        self._log(f"[환율] {source}로 USD\u2192KRW 환율 {rate:,.2f}원 적용 ({today} 기준). raw 통화 코드가 KRW가 아닌 행의 총비용만 변환됩니다.")
+
+    def _clear_exchange_rate(self) -> None:
+        self._exchange_rate = None
+        self.exchange_rate_status_var.set("환율 미적용 (USD 원본 그대로 사용)")
+        self._log("[환율] 환율 변환을 해제했습니다.")
+
     def _open_index_editor(self) -> None:
         rules_path = self.rules_path_var.get().strip()
         if not rules_path:
@@ -493,6 +545,7 @@ class UploadProcessorApp(tk.Tk):
             rules_path=str(resolve_app_path(self.rules_path_var.get().strip())),
             output_path=self.upload_csv_var.get().strip(),
             folder_date=self.folder_date_var.get().strip() or None,
+            exchange_rate=self._exchange_rate,
         )
 
     def _run_downloader_if_configured(self) -> None:

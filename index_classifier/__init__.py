@@ -19,6 +19,7 @@ from .download_folder_processor import (
     discover_raw_files,
     process_download_folder,
 )
+from .exchange_rate import ExchangeRateError, fetch_usd_krw_rate, needs_conversion
 from .models import ClassificationResult
 from .schedule_rules import (
     DownloadWindow,
@@ -40,6 +41,7 @@ __all__ = [
     "ClassificationResult",
     "CleaningConfig",
     "DownloadWindow",
+    "ExchangeRateError",
     "FolderProcessResult",
     "DEFAULT_BRAND_RULES",
     "NullAIAnalyzer",
@@ -56,11 +58,13 @@ __all__ = [
     "discover_raw_files",
     "classify_row",
     "classify_rows",
+    "fetch_usd_krw_rate",
     "filter_indexes_by_scope",
     "index_matches_scope",
     "load_index",
     "load_upload_rows",
     "load_simple_rules_index",
+    "needs_conversion",
     "normalize_row",
     "next_run_datetime",
     "offset_for_report_date",

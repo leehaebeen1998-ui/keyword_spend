@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .brand_settings import resolve_app_path
+from .exchange_rate import needs_conversion
 
 
 UPLOAD_FIELDS: tuple[str, ...] = (
@@ -116,6 +117,7 @@ def build_upload_csv_from_raw(
     output_path: str | Path,
     default_category: str = "",
     rules_path: str | Path | None = None,
+    exchange_rate: float | None = None,
 ) -> RawBuildResult:
     rows = build_upload_rows_from_raw(
         brand=brand,
@@ -123,6 +125,7 @@ def build_upload_csv_from_raw(
         input_path=input_path,
         default_category=default_category,
         rules_path=rules_path,
+        exchange_rate=exchange_rate,
     )
     rows = sort_upload_rows(rows)
     output = Path(output_path)
@@ -152,6 +155,7 @@ def build_upload_rows_from_raw(
     input_path: str | Path,
     default_category: str = "",
     rules_path: str | Path | None = None,
+    exchange_rate: float | None = None,
 ) -> list[dict[str, Any]]:
     path = Path(input_path)
     rows, headers = _read_raw_table(path)
@@ -162,6 +166,7 @@ def build_upload_rows_from_raw(
         source_path=path,
         default_category=default_category,
         rules_path=rules_path,
+        exchange_rate=exchange_rate,
     )
 
 
@@ -173,13 +178,14 @@ def build_upload_rows_from_records(
     source_path: str | Path,
     default_category: str = "",
     rules_path: str | Path | None = None,
+    exchange_rate: float | None = None,
 ) -> list[dict[str, Any]]:
     path = Path(source_path)
     external_rules = _load_brand_rules(rules_path, brand=brand) if rules_path else None
     if not external_rules:
         raise ValueError("rules_path is required. 브랜드별 업로드 규칙 CSV/JSON을 선택해 주세요.")
     return [
-        _build_generic_row(row, media=media, path=path, rules=external_rules)
+        _build_generic_row(row, media=media, path=path, rules=external_rules, exchange_rate=exchange_rate)
         for row in rows
         if not _skip_raw_row_for_file(row, path=path)
     ]
@@ -192,6 +198,7 @@ def build_ilo_merged_upload_rows(
     keyword_path: str | Path,
     search_path: str | Path,
     rules_path: str | Path | None = None,
+    exchange_rate: float | None = None,
 ) -> list[dict[str, Any]]:
     keyword_rows, _ = _read_raw_table(Path(keyword_path))
     search_rows, _ = _read_raw_table(Path(search_path))
@@ -217,6 +224,7 @@ def build_ilo_merged_upload_rows(
         rows=merged,
         source_path=Path(search_path),
         rules_path=rules_path,
+        exchange_rate=exchange_rate,
     )
 
 
@@ -285,7 +293,14 @@ def _load_brand_rules_from_csv(path: Path, *, brand: str) -> dict[str, Any] | No
     }
 
 
-def _build_generic_row(row: dict[str, Any], *, media: str, path: Path, rules: dict[str, Any]) -> dict[str, Any]:
+def _build_generic_row(
+    row: dict[str, Any],
+    *,
+    media: str,
+    path: Path,
+    rules: dict[str, Any],
+    exchange_rate: float | None = None,
+) -> dict[str, Any]:
     fields = rules.get("fields", {})
     date_value = _field(row, fields, "date", "일별", "일", "date")
     campaign_type = _field(row, fields, "campaign_type", "캠페인유형", "캠페인 유형", "campaign_type")
@@ -308,8 +323,17 @@ def _build_generic_row(row: dict[str, Any], *, media: str, path: Path, rules: di
     category = _category_from_rules(context, rules)
 
     impressions = _clean_number(_field(row, fields, "impressions", "노출수", "impressions"))
-    cost = _clean_number(_field(row, fields, "cost", "총비용", "비용", "cost"))
     clicks = _clean_number(_field(row, fields, "clicks", "클릭수", "clicks"))
+
+    currency_code = _field(row, fields, "currency", "통화 코드", "통화", "currency_code")
+    cost = _clean_number(_field(row, fields, "cost", "총비용", "비용", "cost"))
+    cost_per_conversion = _clean_number(
+        _field(row, fields, "cost_per_conversion", "총 전환당비용(원)", "모든 전환당 비용", "cost_per_conversion")
+    )
+    if exchange_rate and needs_conversion(currency_code):
+        cost = _round2(cost * exchange_rate)
+        cost_per_conversion = _round2(cost_per_conversion * exchange_rate)
+
     return {
         "date": _date_to_yyyymmdd(date_value) or _infer_report_date_from_path(path),
         "media": media,
@@ -324,7 +348,7 @@ def _build_generic_row(row: dict[str, Any], *, media: str, path: Path, rules: di
         "cost": cost,
         "conversions": _clean_number(_field(row, fields, "conversions", "총 전환수", "전환", "conversions")),
         "conversion_rate": _percent(_field(row, fields, "conversion_rate", "총 전환율(%)", "전환율", "conversion_rate")),
-        "cost_per_conversion": _clean_number(_field(row, fields, "cost_per_conversion", "총 전환당비용(원)", "모든 전환당 비용", "cost_per_conversion")),
+        "cost_per_conversion": cost_per_conversion,
         "rank": _clean_number(_field(row, fields, "rank", "평균노출순위", "rank")),
     }
 
@@ -693,6 +717,11 @@ def _clean_number(value: Any) -> float | int:
         return int(number) if number == int(number) else number
     except ValueError:
         return 0
+
+
+def _round2(value: float | int) -> float | int:
+    number = round(float(value), 2)
+    return int(number) if number == int(number) else number
 
 
 def _write_text_via_temp_move(path: Path, content: str, *, encoding: str) -> None:
