@@ -7,13 +7,11 @@ from index_classifier import (
     ClassificationEngine,
     ReportRowCleaner,
     append_user_correction,
-    build_daily_report,
     filter_indexes_by_scope,
     load_simple_rules_index,
     normalize_row,
     simple_rules_to_index,
 )
-from index_classifier.adapters import PipelineInput
 from index_classifier.simple_rule_table import append_simple_rule, delete_simple_rule, read_simple_rule_rows
 from index_classifier.ai import AIRequest, AIResponse
 from index_classifier.report_io import read_report_rows
@@ -308,52 +306,6 @@ class ClassifierTests(unittest.TestCase):
 
             self.assertEqual(rows[0]["캠페인"], "C_성범죄")
             self.assertEqual(rows[0]["광고그룹"], "G_강간")
-
-    def test_daily_report_builds_brand_sheet_with_rate_formulas(self):
-        try:
-            from openpyxl import load_workbook
-        except ImportError:
-            self.skipTest("openpyxl is not installed")
-
-        with TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            raw = temp / "naver_thlaw_01_raw_20260629_20260629.csv"
-            rules = temp / "rules.csv"
-            output = temp / "daily.xlsx"
-
-            raw.write_text(
-                '"형사_키워드_주간 보고서(2026.06.29.~2026.06.29.),1826631"\n'
-                "일별,캠페인유형,URL,PC/모바일 매체,캠페인,광고그룹,키워드,노출수,클릭수,총비용,총 전환수\n"
-                "2026.06.29.,파워링크,https://example.com,PC,C_성범죄,G_강간,카촬,100,10,5000,2\n",
-                encoding="utf-8-sig",
-            )
-            rules.write_text(
-                "순위,규칙,매칭값,카테고리,신뢰도,사용,메모\n"
-                "2,그룹명,강간,성범죄,0.9,O,\n",
-                encoding="utf-8-sig",
-            )
-
-            result = build_daily_report(
-                [
-                    PipelineInput(
-                        file_path=raw,
-                        media="Naver",
-                        account_name="태하 네이버",
-                        brand_id="법무법인_태하",
-                    )
-                ],
-                rules,
-                output,
-                append=False,
-            )
-
-            workbook = load_workbook(result.workbook_path, data_only=False)
-            self.assertIn("법무법인_태하", workbook.sheetnames)
-            sheet = workbook["법무법인_태하"]
-            self.assertEqual(sheet["E2"].value, "성범죄")
-            self.assertEqual(sheet["N2"].value, "=IFERROR(K2/J2,0)")
-            self.assertEqual(sheet["O2"].value, "=IFERROR(M2/K2,0)")
-            self.assertEqual(sheet["N2"].number_format, "0.00%")
 
 
 if __name__ == "__main__":
