@@ -24,6 +24,7 @@ from upload_processor_gui import (
     _default_download_root,
     _downloader_brand_name,
     _normalize_external_command,
+    _zero_rows_diagnostic,
 )
 
 DOWNLOADER_TIMEOUT_SEC = 1800
@@ -88,7 +89,7 @@ def main() -> None:
         run_date=run_date,
     )
     if template_result.written_rows <= 0:
-        raise ValueError("템플릿에 반영된 행이 없습니다.")
+        raise ValueError(_zero_rows_diagnostic(template_result))
     _log(config_path, f"[완료] 템플릿 반영: {template_result.output_path}")
     _log(config_path, f"  반영 행 수: {template_result.written_rows}")
     _log(config_path, f"  수정 시트: {', '.join(template_result.touched_sheets)}")

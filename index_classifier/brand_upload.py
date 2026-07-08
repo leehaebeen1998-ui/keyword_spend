@@ -148,7 +148,7 @@ def build_sheet_targets(
                     brand=rule.brand,
                     category=category,
                     report_date=report_date,
-                    sheet_name=f"{sheet_prefix}1일",
+                    sheet_name=f"{sheet_prefix}{report_date.day}일",
                     date_formula=formula,
                     campaign_kind=campaign_kind,
                 )

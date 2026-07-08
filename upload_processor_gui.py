@@ -680,7 +680,7 @@ class UploadProcessorApp(tk.Tk):
             category_mode=_template_category_mode(self.template_category_mode_var.get()),
         )
         if result.written_rows <= 0:
-            raise ValueError("템플릿에 반영된 행이 없습니다. 실행 기준일, 시트명, 카테고리 규칙을 확인해 주세요.")
+            raise ValueError(_zero_rows_diagnostic(result))
         self._log(f"[완료] 템플릿 반영: {result.output_path}")
         self._log(f"  반영 행 수: {result.written_rows}")
         self._log(f"  수정 시트: {', '.join(result.touched_sheets) if result.touched_sheets else '(없음)'}")
@@ -954,6 +954,22 @@ def _media_category_counts(rows: list[dict[str, str]]) -> dict[str, int]:
         key = f"{row.get('media', '') or '(매체 없음)'} / {row.get('category', '') or '(분류 없음)'}"
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _zero_rows_diagnostic(result) -> str:
+    lines = ["템플릿에 반영된 행이 없습니다."]
+    if result.available_row_dates:
+        lines.append(f"  업로드 CSV의 실제 일자: {', '.join(result.available_row_dates)}")
+    else:
+        lines.append("  업로드 CSV에서 유효한 일자를 찾지 못했습니다.")
+    if result.expected_sheet_names:
+        lines.append(f"  기대한 시트명({len(result.expected_sheet_names)}개): {', '.join(result.expected_sheet_names[:8])}" + (" ..." if len(result.expected_sheet_names) > 8 else ""))
+    if result.missing_sheets:
+        lines.append(f"  템플릿에 없는 시트({len(result.missing_sheets)}개): {', '.join(result.missing_sheets[:8])}" + (" ..." if len(result.missing_sheets) > 8 else ""))
+        lines.append("  → 템플릿에 해당 일자 시트가 아직 없는지 확인해 주세요 (예: 오현은 매일 새 날짜 시트가 필요합니다).")
+    else:
+        lines.append("  → 시트는 모두 찾았지만 조건(일자/카테고리/캠페인유형)에 맞는 행이 없습니다. 실행 기준일을 확인해 주세요.")
+    return "\n".join(lines)
 
 
 def _normalize_output_root(value: str) -> str:

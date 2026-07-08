@@ -45,6 +45,9 @@ class TemplateWriteResult:
     written_rows: int
     touched_sheets: list[str]
     skipped_rows: int
+    expected_sheet_names: tuple[str, ...] = ()
+    missing_sheets: tuple[str, ...] = ()
+    available_row_dates: tuple[str, ...] = ()
 
 
 def load_upload_rows(path: str | Path) -> list[dict[str, Any]]:
@@ -117,10 +120,13 @@ def write_xlsx_template(
     targets = _single_sheet_targets(rows, rule, current) if category_mode == "single_sheet" else _build_sheet_targets_for_rows(rule, current, rows)
     touched: list[str] = []
     written = 0
+    missing_sheets: list[str] = []
 
     for target in targets:
         sheet_name = _first_data_sheet_name(workbook) if target.sheet_name == "__SINGLE_SHEET__" else _resolve_workbook_sheet_name(workbook.sheetnames, target.sheet_name)
         if sheet_name is None:
+            if target.sheet_name != "__SINGLE_SHEET__":
+                missing_sheets.append(target.sheet_name)
             continue
         target_rows = _rows_for_target(rows, target)
 
@@ -161,7 +167,21 @@ def write_xlsx_template(
     output = Path(output_path)
     _ensure_directory(output.parent)
     _save_openpyxl_workbook(workbook, output)
-    return TemplateWriteResult(output_path=output, written_rows=written, touched_sheets=touched, skipped_rows=len(rows) - written)
+    available_row_dates = tuple(sorted({
+        parsed.strftime("%Y-%m-%d")
+        for parsed in (_parse_row_date(_first(row, "date", "날짜", "일자")) for row in rows)
+        if parsed is not None
+    }))
+    expected_sheet_names = tuple(target.sheet_name for target in targets)
+    return TemplateWriteResult(
+        output_path=output,
+        written_rows=written,
+        touched_sheets=touched,
+        skipped_rows=len(rows) - written,
+        expected_sheet_names=expected_sheet_names,
+        missing_sheets=tuple(missing_sheets),
+        available_row_dates=available_row_dates,
+    )
 
 
 def write_xlsb_template_with_excel(
@@ -224,7 +244,19 @@ def write_xlsb_template_with_excel(
 
     touched = [target["sheet_name"] for target in targets]
     written = sum(len(target["rows"]) for target in targets)
-    return TemplateWriteResult(output_path=output, written_rows=written, touched_sheets=touched, skipped_rows=len(rows) - written)
+    available_row_dates = tuple(sorted({
+        parsed.strftime("%Y-%m-%d")
+        for parsed in (_parse_row_date(_first(row, "date", "날짜", "일자")) for row in rows)
+        if parsed is not None
+    }))
+    return TemplateWriteResult(
+        output_path=output,
+        written_rows=written,
+        touched_sheets=touched,
+        skipped_rows=len(rows) - written,
+        expected_sheet_names=tuple(target["sheet_name"] for target in sheet_targets),
+        available_row_dates=available_row_dates,
+    )
 
 
 def _rows_for_target(rows: Iterable[dict[str, Any]], target: SheetTarget) -> list[dict[str, Any]]:
