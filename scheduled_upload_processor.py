@@ -19,6 +19,7 @@ from index_classifier.schedule_rules import custom_download_window, default_down
 # 그대로 재사용한다. 이 함수들은 순수 헬퍼(파일 경로 계산, dict 조작)라
 # tkinter 창을 띄우지 않고 임포트해도 안전하다.
 from upload_processor_gui import (
+    _atomic_write_text,
     _bundled_downloader_config_path,
     _default_download_root,
     _downloader_brand_name,
@@ -260,7 +261,7 @@ def _prepare_bundled_downloader_config(config_path: Path, *, brand: str, window)
                     data["media"] = media
                 break
 
-    downloader_config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_text(downloader_config_path, json.dumps(data, ensure_ascii=False, indent=2))
     _log(config_path, f"[ready] 다운로더 브랜드={downloader_brand or brand}, 저장 폴더={download_root}")
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -623,7 +624,7 @@ class UploadProcessorApp(tk.Tk):
                     if isinstance(media, dict):
                         data["media"] = media
                     break
-        config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_text(config_path, json.dumps(data, ensure_ascii=False, indent=2))
         self._log(f"[ready] downloader save folder: {download_root}")
 
     def _download_window(self):
@@ -844,7 +845,7 @@ class UploadProcessorApp(tk.Tk):
             "custom_start": self.custom_start_var.get().strip(),
             "custom_end": self.custom_end_var.get().strip(),
         }
-        config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_text(config_path, json.dumps(data, ensure_ascii=False, indent=2))
         return config_path.resolve()
 
     def _schedule_task_name(self) -> str:
@@ -1046,6 +1047,21 @@ def _normalize_external_command(command: str) -> str:
     if text.endswith(" 실행"):
         text = text[: -len(" 실행")].strip()
     return text
+
+
+def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    """중단(강제종료/충돌 등)되어도 대상 파일이 손상되지 않도록 임시 파일에
+    먼저 쓴 뒤 os.replace로 교체한다.
+
+    write_text()를 바로 쓰면, 쓰는 도중 프로세스가 죽거나 다른 프로세스가
+    같은 파일을 동시에 읽는 경우 config.json이 일부만 쓰인 채로 남아
+    JSONDecodeError를 일으킬 수 있다(다운로더 봇 config.json에서 실제로
+    이런 형태의 손상이 관찰됨). os.replace는 같은 파일시스템 내에서
+    원자적으로 동작하므로 이 문제를 막는다.
+    """
+    tmp_path = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    tmp_path.write_text(text, encoding=encoding)
+    os.replace(tmp_path, path)
 
 
 def _template_update_mode(value: str) -> str:
