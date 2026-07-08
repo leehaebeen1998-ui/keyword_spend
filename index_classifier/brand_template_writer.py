@@ -65,8 +65,9 @@ def write_brand_template(
     run_date: str | date | datetime | None = None,
     update_mode: str = "replace",
     category_mode: str = "category_sheets",
+    rule: BrandUploadRule | None = None,
 ) -> TemplateWriteResult:
-    rule = _brand_rule_for_upload(brand=brand, rows=rows)
+    rule = rule if rule is not None else _brand_rule_for_upload(brand=brand, rows=rows)
     template = Path(template_path)
     output = Path(output_path)
     suffix = template.suffix.lower()

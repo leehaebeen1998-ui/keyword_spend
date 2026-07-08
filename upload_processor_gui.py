@@ -21,14 +21,21 @@ from index_classifier.schedule_rules import custom_download_window, default_down
 from index_classifier.brand_settings import (
     BrandProfile,
     DEFAULT_OUTPUT_ROOT,
+    UI_TYPE_ILRO,
+    UI_TYPE_LABELS,
+    UI_TYPE_OHYUN,
+    UI_TYPE_TAEHA,
     brand_names,
     default_output_path,
     default_upload_csv_path,
     ensure_directory,
     load_profiles,
     resolve_app_path,
+    rule_for_profile,
     safe_name,
     save_profiles,
+    ui_type_for_brand,
+    ui_type_for_profile,
 )
 
 DEFAULT_TEST_SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1AHu6zuHdrNKJ8mcL9jFrRenlzZFL91URAMqwPN5UVgM/edit?gid=0#gid=0"
@@ -52,6 +59,10 @@ class UploadProcessorApp(tk.Tk):
         self.output_path_var = tk.StringVar()
         self.template_update_mode_var = tk.StringVar(value="삭제 후 신규")
         self.template_category_mode_var = tk.StringVar(value="카테고리별 시트")
+        self.categories_var = tk.StringVar()
+        self.google_categories_var = tk.StringVar()
+        self.rolling_days_var = tk.StringVar(value="7")
+        self.today_offset_var = tk.StringVar(value="1")
         self.run_date_var = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
         self.login_command_var = tk.StringVar()
         self.downloader_command_var = tk.StringVar()
@@ -71,6 +82,7 @@ class UploadProcessorApp(tk.Tk):
         self._running = False
         self._operation_started_at: float | None = None
         self._syncing_default_paths = False
+        self._loading_profile = False
         self.run_date_var.trace_add("write", self._on_run_date_changed)
 
         self._build()
@@ -112,35 +124,25 @@ class UploadProcessorApp(tk.Tk):
         ttk.Separator(outer).grid(row=row, column=0, columnspan=3, sticky="ew", pady=12)
 
         row += 1
-        self._path_row(outer, row, "템플릿", self.template_path_var, self._choose_template)
-        row += 1
-        self._path_row(outer, row, "결과 파일", self.output_path_var, self._choose_output_file)
-        row += 1
-        ttk.Label(outer, text="반영 방식").grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Combobox(
-            outer,
-            textvariable=self.template_update_mode_var,
-            values=["삭제 후 신규", "기존 시트 누적"],
-            width=18,
-            state="readonly",
-        ).grid(row=row, column=1, sticky="w", pady=4)
-        ttk.Label(outer, text="시트 방식").grid(row=row, column=1, sticky="e", pady=4, padx=(0, 210))
-        ttk.Combobox(
-            outer,
-            textvariable=self.template_category_mode_var,
-            values=["카테고리별 시트", "단일 시트"],
-            width=16,
-            state="readonly",
-        ).grid(row=row, column=1, sticky="e", pady=4)
-        row += 1
         ttk.Label(outer, text="실행 기준일").grid(row=row, column=0, sticky="w", pady=4)
         ttk.Entry(outer, textvariable=self.run_date_var).grid(row=row, column=1, sticky="ew", pady=4)
         ttk.Label(outer, text="비우면 오늘").grid(row=row, column=2, sticky="w", padx=(8, 0), pady=4)
 
         row += 1
+        ttk.Separator(outer).grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 8))
+
+        row += 1
+        self.notebook = ttk.Notebook(outer)
+        self.notebook.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        self._build_ohyun_tab()
+        self._build_taeha_tab()
+        self._build_ilro_tab()
+        self.notebook.bind("<<NotebookTabChanged>>", lambda _event: self._on_tab_changed())
+
+        row += 1
         exchange = ttk.Frame(outer)
         exchange.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 4))
-        ttk.Label(exchange, text="환율(USD\u2192KRW)").pack(side="left")
+        ttk.Label(exchange, text="환율(USD→KRW)").pack(side="left")
         ttk.Label(exchange, textvariable=self.exchange_rate_status_var).pack(side="left", padx=(8, 8))
         ttk.Button(exchange, text="환율 적용", command=self._run_apply_exchange_rate).pack(side="left")
         ttk.Button(exchange, text="해제", command=self._clear_exchange_rate).pack(side="left", padx=(6, 0))
@@ -155,25 +157,6 @@ class UploadProcessorApp(tk.Tk):
         ttk.Label(integration, text="다운로더 명령").grid(row=1, column=0, sticky="w", pady=(8, 0))
         ttk.Entry(integration, textvariable=self.downloader_command_var).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(8, 0))
         ttk.Button(integration, text="다운로더 실행", command=self._run_downloader).grid(row=1, column=2, sticky="e", pady=(8, 0))
-
-        row += 1
-        sheets = ttk.LabelFrame(outer, text="스프레드시트 업로드", padding=8)
-        sheets.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 4))
-        sheets.columnconfigure(1, weight=1)
-        ttk.Label(sheets, text="스프레드시트 URL/ID").grid(row=0, column=0, sticky="w")
-        ttk.Entry(sheets, textvariable=self.spreadsheet_url_var).grid(row=0, column=1, sticky="ew", padx=(8, 8))
-        ttk.Label(sheets, text="시트명").grid(row=0, column=2, sticky="w")
-        ttk.Entry(sheets, textvariable=self.spreadsheet_sheet_var, width=18).grid(row=0, column=3, sticky="ew", padx=(8, 0))
-        ttk.Label(sheets, text="인증 JSON").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(sheets, textvariable=self.spreadsheet_credentials_var).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(8, 0))
-        ttk.Button(sheets, text="찾기", command=self._choose_spreadsheet_credentials).grid(row=1, column=2, sticky="e", pady=(8, 0))
-        ttk.Combobox(
-            sheets,
-            textvariable=self.spreadsheet_upload_mode_var,
-            values=["삭제 후 신규", "기존 시트 누적"],
-            width=16,
-            state="readonly",
-        ).grid(row=1, column=3, sticky="ew", padx=(8, 0), pady=(8, 0))
 
         row += 1
         schedule = ttk.LabelFrame(outer, text="스케줄", padding=8)
@@ -222,6 +205,91 @@ class UploadProcessorApp(tk.Tk):
         self.log_box.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
 
+    def _build_ohyun_tab(self) -> None:
+        tab = ttk.Frame(self.notebook, padding=8)
+        tab.columnconfigure(1, weight=1)
+        self.notebook.add(tab, text=UI_TYPE_LABELS[UI_TYPE_OHYUN])
+        self._tab_ohyun = tab
+
+        self._path_row(tab, 0, "템플릿", self.template_path_var, self._choose_template)
+        self._path_row(tab, 1, "결과 파일", self.output_path_var, self._choose_output_file)
+        ttk.Label(tab, text="반영 방식").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Combobox(
+            tab,
+            textvariable=self.template_update_mode_var,
+            values=["삭제 후 신규", "기존 시트 누적"],
+            width=18,
+            state="readonly",
+        ).grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(tab, text="카테고리 (신규 브랜드용, 쉼표로 구분)").grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Entry(tab, textvariable=self.categories_var).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        ttk.Label(tab, text="예: 형사, 이혼, 성범죄 (이미 등록된 브랜드는 비워도 됩니다)").grid(row=5, column=0, columnspan=2, sticky="w")
+
+    def _build_taeha_tab(self) -> None:
+        tab = ttk.Frame(self.notebook, padding=8)
+        tab.columnconfigure(1, weight=1)
+        self.notebook.add(tab, text=UI_TYPE_LABELS[UI_TYPE_TAEHA])
+        self._tab_taeha = tab
+
+        self._path_row(tab, 0, "템플릿", self.template_path_var, self._choose_template)
+        self._path_row(tab, 1, "결과 파일", self.output_path_var, self._choose_output_file)
+        ttk.Label(tab, text="반영 방식").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Combobox(
+            tab,
+            textvariable=self.template_update_mode_var,
+            values=["삭제 후 신규", "기존 시트 누적"],
+            width=18,
+            state="readonly",
+        ).grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(tab, text="롤링 일수").grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Entry(tab, textvariable=self.rolling_days_var, width=6).grid(row=3, column=1, sticky="w", pady=4)
+        ttk.Label(tab, text="카테고리 (신규 브랜드용, 쉼표로 구분)").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Entry(tab, textvariable=self.categories_var).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        ttk.Label(tab, text="구글 카테고리 (선택, 쉼표로 구분)").grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Entry(tab, textvariable=self.google_categories_var).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        ttk.Label(tab, text="예: 형, 이, 마 (이미 등록된 브랜드는 비워도 됩니다) / 롤링 일수는 TODAY 기준 며칠치 시트를 갱신할지").grid(row=8, column=0, columnspan=2, sticky="w")
+
+    def _build_ilro_tab(self) -> None:
+        tab = ttk.Frame(self.notebook, padding=8)
+        tab.columnconfigure(1, weight=1)
+        self.notebook.add(tab, text=UI_TYPE_LABELS[UI_TYPE_ILRO])
+        self._tab_ilro = tab
+
+        ttk.Label(tab, text="스프레드시트 URL/ID").grid(row=0, column=0, sticky="w")
+        ttk.Entry(tab, textvariable=self.spreadsheet_url_var).grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        ttk.Label(tab, text="시트명").grid(row=0, column=2, sticky="w")
+        ttk.Entry(tab, textvariable=self.spreadsheet_sheet_var, width=18).grid(row=0, column=3, sticky="ew", padx=(8, 0))
+        ttk.Label(tab, text="인증 JSON").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(tab, textvariable=self.spreadsheet_credentials_var).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(8, 0))
+        ttk.Button(tab, text="찾기", command=self._choose_spreadsheet_credentials).grid(row=1, column=2, sticky="e", pady=(8, 0))
+        ttk.Combobox(
+            tab,
+            textvariable=self.spreadsheet_upload_mode_var,
+            values=["삭제 후 신규", "기존 시트 누적"],
+            width=16,
+            state="readonly",
+        ).grid(row=1, column=3, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(tab, text="이 유형은 템플릿 반영 없이 '3. 스프레드시트 업로드'만 사용해도 됩니다.\n(단일 시트 엑셀로도 반영하려면 '오현형' 탭에서 템플릿/결과 파일을 지정하세요.)").grid(row=2, column=0, columnspan=4, sticky="w", pady=(8, 0))
+
+    def _current_ui_type(self) -> str:
+        if not hasattr(self, "notebook"):
+            return UI_TYPE_OHYUN
+        index = self.notebook.index("current")
+        return {0: UI_TYPE_OHYUN, 1: UI_TYPE_TAEHA, 2: UI_TYPE_ILRO}.get(index, UI_TYPE_OHYUN)
+
+    def _select_tab_for_type(self, ui_type: str) -> None:
+        if not hasattr(self, "notebook"):
+            return
+        index = {UI_TYPE_OHYUN: 0, UI_TYPE_TAEHA: 1, UI_TYPE_ILRO: 2}.get(ui_type, 0)
+        self.notebook.select(index)
+
+    def _on_tab_changed(self) -> None:
+        # 사용자가 탭을 직접 바꾸는 것은 "새 브랜드를 이 유형으로 추가/저장하겠다"는
+        # 의도로 취급한다. 기존 브랜드를 불러오는 중(_load_brand_profile)에는
+        # 여기서 아무것도 할 필요 없다 (그쪽에서 이미 알맞은 탭을 선택해 준다).
+        if self._loading_profile:
+            return
+
     def _path_row(
         self,
         parent: ttk.Frame,
@@ -251,19 +319,26 @@ class UploadProcessorApp(tk.Tk):
             self.brand_var.set(values[0])
 
     def _add_brand(self) -> None:
-        name = simpledialog.askstring("브랜드 추가", "추가할 브랜드명을 입력해 주세요.", parent=self)
+        name = simpledialog.askstring(
+            "브랜드 추가",
+            f"추가할 브랜드명을 입력해 주세요.\n(현재 선택된 탭 '{UI_TYPE_LABELS[self._current_ui_type()]}' 유형으로 추가됩니다.)",
+            parent=self,
+        )
         if not name:
             return
         name = name.strip()
         if not name:
             return
-        self.profiles.setdefault(name, BrandProfile(name=name))
+        ui_type = self._current_ui_type()
+        category_mode = "single_sheet" if ui_type == UI_TYPE_ILRO else "category_sheets"
+        sheet_mode = "rolling_day_sheets" if ui_type == UI_TYPE_TAEHA else "fixed_today_offset"
+        self.profiles.setdefault(name, BrandProfile(name=name, category_mode=category_mode, sheet_mode=sheet_mode))
         self.brand_var.set(name)
         self._refresh_brand_values()
         self._load_brand_profile()
         self._set_default_paths(force_empty_only=False)
         self._save_current_profile()
-        self._log(f"[완료] 브랜드 추가: {name}")
+        self._log(f"[완료] 브랜드 추가: {name} ({UI_TYPE_LABELS[ui_type]})")
 
     def _on_brand_changed(self) -> None:
         self._load_brand_profile()
@@ -281,36 +356,58 @@ class UploadProcessorApp(tk.Tk):
         self.after_idle(self._refresh_schedule)
 
     def _load_brand_profile(self) -> None:
-        profile = self.profiles.get(self.brand_var.get().strip())
-        if not profile:
-            self.download_folder_var.set(_default_download_root())
-            self.template_path_var.set("")
-            self.login_command_var.set(_default_login_command())
-            self.downloader_command_var.set(_default_downloader_command())
-            self.spreadsheet_url_var.set("")
-            self.spreadsheet_sheet_var.set("")
-            self.spreadsheet_credentials_var.set("")
-            self.spreadsheet_upload_mode_var.set("삭제 후 신규")
-            return
-        self.rules_path_var.set(str(resolve_app_path(profile.rules_path or self.rules_path_var.get())))
-        self.download_folder_var.set(profile.download_folder or _default_download_root())
-        self.template_path_var.set(profile.template_path)
-        self.output_root_var.set(_normalize_output_root(profile.output_root))
-        self.upload_csv_var.set(profile.upload_csv)
-        self.login_command_var.set(profile.login_command or _default_login_command())
-        self.downloader_command_var.set(profile.downloader_command or _default_downloader_command())
-        self.spreadsheet_url_var.set(profile.spreadsheet_url)
-        self.spreadsheet_sheet_var.set(profile.spreadsheet_sheet_name)
-        self.spreadsheet_credentials_var.set(profile.spreadsheet_credentials_path)
-        self.spreadsheet_upload_mode_var.set(_spreadsheet_upload_mode_label(profile.spreadsheet_upload_mode))
-        self._set_default_download_folder()
+        self._loading_profile = True
+        try:
+            profile = self.profiles.get(self.brand_var.get().strip())
+            if not profile:
+                self.download_folder_var.set(_default_download_root())
+                self.template_path_var.set("")
+                self.login_command_var.set(_default_login_command())
+                self.downloader_command_var.set(_default_downloader_command())
+                self.spreadsheet_url_var.set("")
+                self.spreadsheet_sheet_var.set("")
+                self.spreadsheet_credentials_var.set("")
+                self.spreadsheet_upload_mode_var.set("삭제 후 신규")
+                self.categories_var.set("")
+                self.google_categories_var.set("")
+                self.rolling_days_var.set("7")
+                self.today_offset_var.set("1")
+                brand = self.brand_var.get().strip()
+                self._select_tab_for_type(ui_type_for_brand(brand, self.profiles) if brand else UI_TYPE_OHYUN)
+                return
+            self.rules_path_var.set(str(resolve_app_path(profile.rules_path or self.rules_path_var.get())))
+            self.download_folder_var.set(profile.download_folder or _default_download_root())
+            self.template_path_var.set(profile.template_path)
+            self.output_root_var.set(_normalize_output_root(profile.output_root))
+            self.upload_csv_var.set(profile.upload_csv)
+            self.login_command_var.set(profile.login_command or _default_login_command())
+            self.downloader_command_var.set(profile.downloader_command or _default_downloader_command())
+            self.spreadsheet_url_var.set(profile.spreadsheet_url)
+            self.spreadsheet_sheet_var.set(profile.spreadsheet_sheet_name)
+            self.spreadsheet_credentials_var.set(profile.spreadsheet_credentials_path)
+            self.spreadsheet_upload_mode_var.set(_spreadsheet_upload_mode_label(profile.spreadsheet_upload_mode))
+            self.categories_var.set(profile.categories)
+            self.google_categories_var.set(profile.google_categories)
+            self.rolling_days_var.set(str(profile.rolling_days or 7))
+            self.today_offset_var.set(str(profile.today_offset if profile.today_offset is not None else 1))
+            self._select_tab_for_type(ui_type_for_brand(profile.name, self.profiles))
+            self._set_default_download_folder()
+        finally:
+            self._loading_profile = False
 
-    def _save_current_profile(self) -> None:
-        brand = self.brand_var.get().strip()
-        if not brand:
-            messagebox.showerror("오류", "브랜드를 먼저 입력해 주세요.")
-            return
-        self.profiles[brand] = BrandProfile(
+    def _profile_from_current_fields(self, brand: str) -> BrandProfile:
+        ui_type = self._current_ui_type()
+        category_mode = "single_sheet" if ui_type == UI_TYPE_ILRO else "category_sheets"
+        sheet_mode = "rolling_day_sheets" if ui_type == UI_TYPE_TAEHA else "fixed_today_offset"
+        try:
+            rolling_days = int(self.rolling_days_var.get().strip() or "7")
+        except ValueError:
+            rolling_days = 7
+        try:
+            today_offset = int(self.today_offset_var.get().strip() or "1")
+        except ValueError:
+            today_offset = 1
+        return BrandProfile(
             name=brand,
             rules_path=self.rules_path_var.get().strip(),
             download_folder=self.download_folder_var.get().strip(),
@@ -323,14 +420,28 @@ class UploadProcessorApp(tk.Tk):
             spreadsheet_sheet_name=self.spreadsheet_sheet_var.get().strip(),
             spreadsheet_credentials_path=self.spreadsheet_credentials_var.get().strip(),
             spreadsheet_upload_mode=_spreadsheet_upload_mode(self.spreadsheet_upload_mode_var.get()),
+            category_mode=category_mode,
+            sheet_mode=sheet_mode,
+            categories=self.categories_var.get().strip(),
+            google_categories=self.google_categories_var.get().strip(),
+            rolling_days=rolling_days,
+            today_offset=today_offset,
         )
+
+    def _save_current_profile(self) -> None:
+        brand = self.brand_var.get().strip()
+        if not brand:
+            messagebox.showerror("오류", "브랜드를 먼저 입력해 주세요.")
+            return
+        profile = self._profile_from_current_fields(brand)
+        self.profiles[brand] = profile
         try:
             path = save_profiles(self.profiles)
         except OSError as exc:
             self._log(f"[경고] 브랜드 설정 저장 실패: {exc}")
             return
         self._refresh_brand_values()
-        self._log(f"[완료] 브랜드 설정 저장: {path.resolve()}")
+        self._log(f"[완료] 브랜드 설정 저장: {path.resolve()} ({UI_TYPE_LABELS[self._current_ui_type()]})")
 
     def _set_default_paths(self, *, force_empty_only: bool) -> None:
         brand = self.brand_var.get().strip()
@@ -459,7 +570,7 @@ class UploadProcessorApp(tk.Tk):
     def _prompt_manual_exchange_rate(self) -> None:
         value = simpledialog.askfloat(
             "환율 직접 입력",
-            "자동 조회에 실패했습니다. 오늘 USD \u2192 KRW 환율을 직접 입력해 주세요.\n예: 1380.5",
+            "자동 조회에 실패했습니다. 오늘 USD → KRW 환율을 직접 입력해 주세요.\n예: 1380.5",
             parent=self,
             minvalue=0.0,
         )
@@ -473,7 +584,7 @@ class UploadProcessorApp(tk.Tk):
         self._exchange_rate = rate
         today = date.today().strftime("%Y-%m-%d")
         self.exchange_rate_status_var.set(f"적용: 1USD = {rate:,.2f}원 ({source}, {today})")
-        self._log(f"[환율] {source}로 USD\u2192KRW 환율 {rate:,.2f}원 적용 ({today} 기준). raw 통화 코드가 KRW가 아닌 행의 총비용만 변환됩니다.")
+        self._log(f"[환율] {source}로 USD→KRW 환율 {rate:,.2f}원 적용 ({today} 기준). raw 통화 코드가 KRW가 아닌 행의 총비용만 변환됩니다.")
 
     def _clear_exchange_rate(self) -> None:
         self._exchange_rate = None
@@ -652,6 +763,10 @@ class UploadProcessorApp(tk.Tk):
         return [date_key for date_key in expected if date_key not in available]
 
     def _template_update(self) -> None:
+        ui_type = self._current_ui_type()
+        if ui_type == UI_TYPE_ILRO and not self.template_path_var.get().strip():
+            self._log("[안내] 일로형: 템플릿이 설정되지 않아 템플릿 반영 단계를 건너뜁니다 (스프레드시트 업로드만 사용).")
+            return
         self._validate_file_inputs(require_template=True)
         self._refresh_schedule()
         rows_csv = Path(self.upload_csv_var.get().strip())
@@ -670,14 +785,17 @@ class UploadProcessorApp(tk.Tk):
         for key, count in sorted(_media_category_counts(positive_rows).items(), key=lambda item: (-item[1], item[0])):
             self._log(f"  {key}: {count}")
         self._log("[진행] 템플릿 반영 시작")
+        brand = self.brand_var.get().strip()
+        rule = rule_for_profile(self._profile_from_current_fields(brand))
         result = write_brand_template(
-            brand=self.brand_var.get().strip(),
+            brand=brand,
             template_path=self.template_path_var.get().strip(),
             output_path=self.output_path_var.get().strip(),
             rows=rows,
             run_date=self.run_date_var.get().strip() or None,
             update_mode=_template_update_mode(self.template_update_mode_var.get()),
             category_mode=_template_category_mode(self.template_category_mode_var.get()),
+            rule=rule,
         )
         if result.written_rows <= 0:
             raise ValueError(_zero_rows_diagnostic(result))
@@ -1069,10 +1187,10 @@ def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> Non
     """중단(강제종료/충돌 등)되어도 대상 파일이 손상되지 않도록 임시 파일에
     먼저 쓴 뒤 os.replace로 교체한다.
 
-    write_text()를 바로 쓰면, 쓰는 도중 프로세스가 죽거나 다른 프로세스가
+    write_text()를 바로 쓰면, 쓰기 도중 프로세스가 죽거나 다른 프로세스가
     같은 파일을 동시에 읽는 경우 config.json이 일부만 쓰인 채로 남아
     JSONDecodeError를 일으킬 수 있다(다운로더 봇 config.json에서 실제로
-    이런 형태의 손상이 관찰됨). os.replace는 같은 파일시스템 내에서
+    이런 형태의 손상이 관측됨). os.replace는 같은 파일시스템 내에서
     원자적으로 동작하므로 이 문제를 막는다.
     """
     tmp_path = path.with_name(f"{path.name}.tmp{os.getpid()}")

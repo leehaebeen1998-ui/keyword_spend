@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from index_classifier.brand_template_writer import write_brand_template
-from index_classifier.brand_settings import DEFAULT_OUTPUT_ROOT, default_output_path, default_upload_csv_path
+from index_classifier.brand_settings import (
+    DEFAULT_OUTPUT_ROOT,
+    default_output_path,
+    default_upload_csv_path,
+    load_profiles,
+    rule_for_profile,
+)
 from index_classifier.download_folder_processor import process_download_folder
 from index_classifier.schedule_rules import custom_download_window, default_download_window
 
@@ -81,18 +87,25 @@ def main() -> None:
     if not rows:
         raise ValueError("업로드 CSV에 데이터가 없습니다.")
 
-    template_result = write_brand_template(
-        brand=brand,
-        template_path=str(config["template_path"]),
-        output_path=output_path,
-        rows=rows,
-        run_date=run_date,
-    )
-    if template_result.written_rows <= 0:
-        raise ValueError(_zero_rows_diagnostic(template_result))
-    _log(config_path, f"[완료] 템플릿 반영: {template_result.output_path}")
-    _log(config_path, f"  반영 행 수: {template_result.written_rows}")
-    _log(config_path, f"  수정 시트: {', '.join(template_result.touched_sheets)}")
+    template_path = str(config.get("template_path") or "")
+    if not template_path:
+        _log(config_path, "[안내] 템플릿 경로가 설정되지 않아 템플릿 반영 단계를 건너뜁니다 (일로형: 스프레드시트만 사용).")
+    else:
+        profile = load_profiles().get(brand)
+        rule = rule_for_profile(profile) if profile else None
+        template_result = write_brand_template(
+            brand=brand,
+            template_path=template_path,
+            output_path=output_path,
+            rows=rows,
+            run_date=run_date,
+            rule=rule,
+        )
+        if template_result.written_rows <= 0:
+            raise ValueError(_zero_rows_diagnostic(template_result))
+        _log(config_path, f"[완료] 템플릿 반영: {template_result.output_path}")
+        _log(config_path, f"  반영 행 수: {template_result.written_rows}")
+        _log(config_path, f"  수정 시트: {', '.join(template_result.touched_sheets)}")
 
 
 def _ensure_raw_available(
