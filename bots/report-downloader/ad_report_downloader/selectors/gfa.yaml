@@ -1,0 +1,94 @@
+# Naver GFA (디스플레이 광고) 성과 보고서 셀렉터
+# URL: https://ads.naver.com/manage/ad-accounts/{account_id}/da/report/performance
+# UI: Naver 광고주센터 (ad-cms-* BEM 클래스 — SA와 공통)
+
+base_url: "https://ads.naver.com"
+
+login:
+  login_url_patterns:
+    - "nid.naver.com"
+    - "naver.com/login"
+  login_element_selector: "input#id, input[name='id'], input[placeholder*='아이디']"
+
+report:
+  # 성과 보고서 직접 URL: /manage/ad-accounts/{account_id}/da/report/performance
+  performance_path: "/manage/ad-accounts/{account_id}/da/report/performance"
+
+period:
+  # 날짜 범위 버튼 (클릭 시 달력 모달 열림)
+  # SA와 동일 구조: button.ad-cms-btn-lg + span[style*="width: 90px"]
+  date_range_button: >
+    button.ad-cms-btn-lg:has(span[style*="width: 90px"]),
+    button.ad-cms-btn-default.ad-cms-btn-lg,
+    button:has([class*='icon-calendar']),
+    button[aria-label*='날짜'],
+    button[aria-label*='기간']
+
+  # 달력 날짜 셀 (SA와 동일: data-year/data-month(0-indexed)/data-day)
+  # [data-year="2026"][data-month="5"] li[data-day="15"] button
+  calendar_day_selector: "[data-year='{year}'][data-month='{month0}'] li[data-day='{day}'] button"
+
+  # 달력 모달 내 확인 버튼
+  confirm_button: >
+    button[data-nclick='ok'],
+    button.ad-cms-btn-color-primary:has-text('확인'),
+    button.ad-cms-btn-variant-solid:has-text('확인')
+
+options:
+  # 라디오 옵션 선택 — label 텍스트 기반 클릭
+  # 분석 단위: 광고 계정 / 캠페인 / 광고 그룹 / 애셋 그룹 / 광고 소재
+  # 기간 단위: 전체 / 일 / 주 / 월 / 시간
+  # 게재 위치: 전체 / 매체 그룹 / 매체 그룹 및 게재 위치
+  # 오디언스: 전체 / 연령 / 성별 / 연령 및 성별 / 기기 / 기기 및 OS
+  radio_label: "label:has-text('{option}')"
+  radio_span: "span:text-is('{option}')"
+
+  # 옵션 적용 확인 버튼 (페이지 중앙 파란 버튼)
+  main_confirm: >
+    button[data-nclick='ok'],
+    button.ad-cms-btn-color-primary.ad-cms-btn-variant-solid:has-text('확인')
+
+column_preset:
+  # 열 맞춤 설정 드롭다운 트리거
+  # "열 맞춤 설정" 버튼 옆의 ▽ 버튼 (프리셋 선택용 dropdown-trigger)
+  # DevTools 확인: button.ad-cms-btn-variant-outlined.ad-cms-btn-icon-end.ad-cms-dropdown-trigger
+  dropdown_trigger: >
+    button.ad-cms-btn-icon-end.ad-cms-dropdown-trigger,
+    button.ad-cms-btn-variant-outlined.ad-cms-dropdown-trigger,
+    button.ad-cms-dropdown-trigger:not(:has-text('열 맞춤 설정'))
+  # 드롭다운 아이템 (preset 이름으로 매칭)
+  dropdown_item: >
+    li:has-text('{preset}'),
+    [role='menuitem']:has-text('{preset}'),
+    [class*='dropdown-item']:has-text('{preset}'),
+    li.ad-cms-dropdown-item:has-text('{preset}')
+
+download:
+  # 1단계: 보고서 페이지에서 직접 클릭하는 "다운로드 요청" 버튼
+  # (정확한 텍스트 매칭 — "다운로드 요청 목록" 제외)
+  request_button: >
+    button:text-is('다운로드 요청'),
+    button.ad-cms-btn-primary:text-is('다운로드 요청'),
+    button:has-text('다운로드 요청'):not(:has-text('목록'))
+
+  # 3단계: 요청 후 목록 패널 열기 버튼
+  open_list_button: >
+    button:has-text('다운로드 요청 목록'),
+    button:has-text('요청 목록')
+
+  # 다운로드 요청 확인 모달의 확인 버튼
+  dialog_confirm: >
+    div[role='dialog'] button[data-nclick='ok'],
+    .ad-cms-modal button[data-nclick='ok'],
+    .ad-cms-modal button.ad-cms-btn-color-primary:has-text('확인'),
+    div[role='dialog'] button.ad-cms-btn-color-primary:has-text('확인')
+
+  # 다운로드 목록에서 파일 준비 완료된 항목의 다운로드 버튼
+  # (첫 번째 행 한정하지 않음 — 최신 요청이 1행이 아닐 수도 있음)
+  list_download_button: >
+    tbody tr button:has-text('다운로드'),
+    tbody tr a:has-text('다운로드'),
+    [class*='list-item'] button:has-text('다운로드'),
+    [class*='download-item'] a:has-text('다운로드')
+
+  timeout_sec: 300

@@ -30,6 +30,9 @@ class BrandProfile:
     upload_csv: str = ""
     login_command: str = ""
     downloader_command: str = ""
+    # 다운로더 봇 config.json에 등록된 브랜드명(별칭)을 직접 지정.
+    # 비우면 기존처럼 이 프로그램의 브랜드명으로 자동 별칭 매칭(_downloader_brand_name)한다.
+    downloader_brand: str = ""
     spreadsheet_url: str = ""
     spreadsheet_sheet_name: str = ""
     spreadsheet_credentials_path: str = ""

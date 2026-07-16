@@ -17,3 +17,15 @@ outputs/
 python/
 brand_profiles.json
 upload_processor_schedule.json
+
+# ── 민감 정보/런타임 (2026-07-16, bots 통합) ──
+config.json
+config.json.bak
+.test_config.json
+*credentials*.json
+*service_account*.json
+chrome_profile/
+logs/
+*.log
+ms-playwright/
+downloads/

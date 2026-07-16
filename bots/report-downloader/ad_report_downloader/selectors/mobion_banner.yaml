@@ -1,0 +1,35 @@
+﻿# 모비온 통합 배너 보고서 셀렉터 — 구 UI (manage.mobon.net)
+base_url: "https://manage.mobon.net"
+login:
+  login_url_patterns:
+    - "/login"
+    - "manage.mobon.net/login"
+    - "manage.mobon.net/member/login"
+    - "/ad/ajax/loginProcess"
+  login_element_selector: "input[name='userId'], input[name='userPw'], input[id='userId'], button[id='login']"
+
+report:
+  old_ui_path: "/agency/performance"
+  report_url_path: "/report/total_list"
+
+account_switch:
+  modal_trigger: "span.modalOpen[data-url*='user_change'], span.modalOpen"
+  account_row_by_id: "tr[data-advertiser-id='{account_id}']"
+  password_section: "div.modalContent.loginPwInsert, article.reEnterPassword"
+  password_input: "input#passwordInput, input[name='member_passwd']"
+  confirm_button: "div.modalContent button:has-text('확인'), article.reEnterPassword button[type='submit'], button:has-text('확인')"
+
+period:
+  date_range_button: "div.dateChoice, div.clear.calendar, #dateInput"
+  picker: "div.daterangepicker"
+  prev_month_btn: "div.daterangepicker div.drp-calendar.left th.prev.available"
+  next_month_btn: "div.daterangepicker div.drp-calendar.left th.next.available"
+  month_header_left: "div.daterangepicker div.drp-calendar.left th.month"
+  month_header_right: "div.daterangepicker div.drp-calendar.right th.month"
+  day_cell_left: "div.daterangepicker div.drp-calendar.left td.available:not(.off)"
+  day_cell_right: "div.daterangepicker div.drp-calendar.right td.available:not(.off)"
+  apply_button: ""
+
+download:
+  button: "a#excelBtn button.excelDown, button.excelDown"
+  button_fallback: "a#excelBtn, button:has-text('엑셀')"

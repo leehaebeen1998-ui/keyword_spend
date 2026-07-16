@@ -444,12 +444,28 @@ def _category_from_rules(context: dict[str, str], rules: dict[str, Any]) -> str:
 def _media_matches(row_media: str, rule_media: str) -> bool:
     if not rule_media or rule_media in ("전체", "ALL", "all"):
         return True
-    return _normalize_media(row_media) == _normalize_media(rule_media)
+    row_norm = _normalize_media(row_media)
+    rule_norm = _normalize_media(rule_media)
+    # 규칙 매체가 "구글"/"Google"처럼 SA/DA 구분 없이 적힌 경우 → 둘 다 매칭
+    if rule_norm == "google":
+        return row_norm.startswith("google")
+    return row_norm == rule_norm
 
 
 def _normalize_media(value: str) -> str:
+    """매체명 정규화.
+
+    2026-07-13 수정: 기존에는 Google SA/DA를 모두 "google"로 뭉개서
+    규칙 CSV의 매체 열에 적힌 SA/DA 구분이 무효화되던 문제가 있었다.
+    이제 "googlesa"/"googleda"를 구분해서 돌려주고, SA/DA 표기가 없는
+    "google"/"구글"은 _media_matches에서 둘 다에 매칭되도록 처리한다.
+    """
     normalized = str(value).casefold().replace(" ", "").replace("_", "")
     if "google" in normalized or "구글" in normalized:
+        if "sa" in normalized or "검색" in normalized:
+            return "googlesa"
+        if "da" in normalized or "디스플레이" in normalized:
+            return "googleda"
         return "google"
     if "naver" in normalized or "네이버" in normalized:
         return "naver"
@@ -503,14 +519,30 @@ def _read_xlsx_table(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
         raise RuntimeError("openpyxl is required for spreadsheet raw upload.") from exc
     workbook = load_workbook(path, read_only=True, data_only=True)
     raw_rows: list[list[Any]] = []
+    fallback_rows: list[list[Any]] | None = None
     try:
         for worksheet in workbook.worksheets:
+            sheet_rows: list[list[Any]] = []
             for row in worksheet.iter_rows(values_only=True):
                 values = ["" if value is None else value for value in row]
                 if any(str(value).strip() for value in values):
-                    raw_rows.append(values)
-            if raw_rows:
+                    sheet_rows.append(values)
+            if not sheet_rows:
+                continue
+            if fallback_rows is None:
+                fallback_rows = sheet_rows
+            # 다운로드 원본 파일에 요약/피벗 시트가 raw 데이터 시트보다 먼저 나오는
+            # 경우가 있다(예: "Sheet1"에 키워드별 합계 피벗, "로우" 시트에 실제
+            # 일자별 raw 데이터). 예전에는 그냥 "첫 번째로 내용이 있는 시트"를
+            # 무조건 raw로 취급해서, 피벗 시트의 요약 헤더("합계 : 노출수" 등)를
+            # raw 헤더로 잘못 인식해 실제 raw 데이터(로우 시트)를 통째로 건너뛰는
+            # 버그가 있었다. 이제 각 시트마다 raw 헤더(키워드/노출수/클릭수 등)가
+            # 실제로 있는지 확인해서, 진짜 raw 헤더를 가진 시트를 우선 사용한다.
+            if _find_header_index_strict([[str(value) for value in row] for row in sheet_rows]) is not None:
+                raw_rows = sheet_rows
                 break
+        else:
+            raw_rows = fallback_rows or []
     finally:
         workbook.close()
     if not raw_rows:
@@ -533,6 +565,11 @@ def _detect_encoding(path: Path) -> str:
 
 
 def _detect_header_index(rows: list[list[str]]) -> int:
+    strict = _find_header_index_strict(rows)
+    return strict if strict is not None else 0
+
+
+def _find_header_index_strict(rows: list[list[str]]) -> int | None:
     required = {"키워드", "노출수", "클릭수"}
     for idx, row in enumerate(rows[:10]):
         values = {str(value).strip() for value in row}
@@ -540,7 +577,7 @@ def _detect_header_index(rows: list[list[str]]) -> int:
             return idx
         if {"검색 키워드", "노출수", "클릭수"} <= values:
             return idx
-    return 0
+    return None
 
 
 def _build_ohyun_row(row: dict[str, Any], *, media: str) -> dict[str, Any]:
@@ -756,3 +793,4 @@ def _write_text_via_temp_move(path: Path, content: str, *, encoding: str) -> Non
             tmp_path.unlink()
         except OSError:
             pass
+# (문서화) 2026-07-13: SA/DA 매체 구분 수정 — _normalize_media / _media_matches 참고

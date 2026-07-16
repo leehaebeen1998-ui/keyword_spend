@@ -1,0 +1,77 @@
+# Naver 검색광고 다차원 보고서 셀렉터
+# 확인된 URL: https://ads.naver.com/manage/ad-accounts/{account_id}/sa/reports
+# UI: ads.naver.com (신규 광고주센터) — BEM 클래스 기반 (ad-cms-*)
+
+base_url: "https://ads.naver.com"
+
+login:
+  login_url_patterns:
+    - "nid.naver.com"
+    - "naver.com/login"
+  login_element_selector: "input#id, input[name='id'], input[placeholder*='아이디']"
+
+report:
+  # 보고서 목록 URL: /manage/ad-accounts/{account_id}/sa/reports
+  # account_id 는 config.json media.naver.account_id 에서 주입
+  report_list_path: "/manage/ad-accounts/{account_id}/sa/reports"
+
+  # 사이드바 보고서 메뉴 (fallback용)
+  sidebar_report: "a:has-text('보고서'), li:has-text('보고서') a"
+  sidebar_multidim: "a:has-text('다차원 보고서'), a:has-text('다차원보고서')"
+
+  # 보고서 목록에서 이름으로 클릭
+  # <a href="...rtt-a001-...">보고서이름</a>
+  report_list_link: "a[href*='/sa/reports/rtt-']"
+
+period:
+  # 날짜 범위 버튼 (클릭 시 피커 팝업 열림)
+  # 실제 HTML 구조:
+  # <button class="ad-cms-btn ... ad-cms-btn-variant-text ad-cms-btn-lg">
+  #   <span style="width: 90px; text-align: left;">2026.06.16.</span>
+  #   <svg>→</svg>
+  #   <span style="width: 90px; text-align: left;">2026.06.22.</span>
+  #   <svg>📅</svg>
+  # </button>
+  date_range_button: >
+    button.ad-cms-btn-lg:has(span[style*="width: 90px"]),
+    button.ad-cms-btn-default.ad-cms-btn-lg,
+    button.ad-cms-btn:has([class*='icon-calendar']),
+    [class*='date-range'] button,
+    button[aria-label*='날짜'],
+    button[aria-label*='기간']
+
+  # ── 날짜 입력 필드 (팝업 내) ──────────────────────────────────────────
+  # 팝업이 열린 후 텍스트 입력 필드 (있을 수도 없을 수도 있음)
+  start_input: >
+    input.ad-cms-input[placeholder='YYYY.MM.DD.'],
+    input[placeholder*='YYYY.MM.DD'],
+    input[placeholder*='시작'],
+    input[type='text']:nth-of-type(1)
+  end_input: >
+    input.ad-cms-input[placeholder='YYYY.MM.DD.']:nth-of-type(2),
+    input[placeholder*='YYYY.MM.DD']:nth-of-type(2),
+    input[placeholder*='종료'],
+    input[type='text']:nth-of-type(2)
+
+  # 날짜 형식
+  date_format: "YYYY.MM.DD."
+
+  # 확인 버튼 (파란색 primary 버튼)
+  # <button class="ad-cms-btn ... ad-cms-btn-color-primary ...">확인</button>
+  confirm_button: "button.ad-cms-btn-color-primary:has-text('확인'), button.ad-cms-btn:has-text('확인')"
+
+  # 취소 버튼 (fallback)
+  cancel_button: "button.ad-cms-btn:has-text('취소')"
+
+  # 달력 날짜 셀 (캘린더 직접 클릭 fallback)
+  # <td class="..."><button ...>10</button></td>
+  calendar_day_cell: "td button:not(:disabled), [class*='calendar'] td:not([class*='disabled'])"
+
+download:
+  # ── 확인된 다운로드 버튼 ────────────────────────────────────────────
+  # <button class="ad-cms-btn ... ad-cms-btn-variant-text ad-cms-btn-lg" style="width:123px;">
+  #   <span>다운로드</span>
+  # </button>
+  button: "button.ad-cms-btn.ad-cms-btn-variant-text:has-text('다운로드'), button.ad-cms-btn:has-text('다운로드')"
+  button_fallback: "button:has-text('다운로드'):not(:disabled)"
+  timeout_sec: 90

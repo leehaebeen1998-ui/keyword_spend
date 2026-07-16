@@ -1,0 +1,87 @@
+# Meta Ads Manager 보고서 셀렉터
+# https://adsmanager.facebook.com
+# ※ Meta의 x1vvo52/xk50ysn 등 해시 CSS 클래스는 빌드마다 변경됨 — 사용 금지
+# ※ data-surface / aria-label / role / id / data-* 기반 셀렉터만 사용
+
+base_url: "https://adsmanager.facebook.com"
+
+# ── 로그인 확인 ──────────────────────────────────────────────────────────────
+login:
+  login_url_patterns:
+    - "facebook.com/login"
+    - "www.facebook.com/r.php"
+    - "business.facebook.com/login"
+  login_element_selector: "input[name='email'], input[name='pass'], input[type='email']"
+
+# ── 계정 전환 ────────────────────────────────────────────────────────────────
+# 방법: URL의 act + business_id 파라미터를 교체하여 직접 이동
+# 확인된 URL (Screenshot 3):
+#   https://adsmanager.facebook.com/adsreporting/?act=1191819368044014&business_id=187111177012330
+#
+# config.json 필수 필드:
+#   account_id  : 숫자 광고 계정 ID (예: "1191819368044014")
+#   business_id : Meta 비즈니스 계정 ID (예: "187111177012330") — 공통값
+account_switch:
+  # 계정별 보고서 탭 직접 URL (act + business_id 파라미터)
+  reporting_url_with_account: "/adsreporting/?act={account_id}&business_id={business_id}"
+
+  # 현재 계정 확인: URL의 act 파라미터 값으로 확인 (가장 신뢰도 높음)
+  # 상단 표시 예: "네오바디 (14207241665094)" / "태하_이흔 (119181936804...)"
+  current_account_label: "[data-surface*='business_scope_ad_account']"
+
+# ── 보고서 이동 ──────────────────────────────────────────────────────────────
+# 확인된 URL 구조 (Screenshot 3):
+#   목록: https://adsmanager.facebook.com/adsreporting/?act=...
+#   뷰:   https://adsmanager.facebook.com/adsreporting/view?act=...
+# ※ 주의: /adsmanager/reporting 은 구 URL — /adsreporting/ 이 올바른 경로
+report:
+  reporting_url_path: "/adsreporting/"
+
+  # 사이드바 "보고서" 메뉴 아이템 (Screenshot 3 좌측)
+  # 항목: 계정 인사이트 | 보고서 | 내보내기
+  sidebar_ad_report: |
+    [aria-label*='광고 보고서'], a:has-text('광고 보고서'),
+    [data-surface*='REPORTING'], a[href*='adsreporting'],
+    [role='link']:has-text('보고서')
+
+  # 저장된 보고서 목록 내 보고서명 링크
+  # 확인된 HTML (Screenshot 3 DevTools):
+  #   <a class="xt0psk2 x1hl2dhg ...">메타 주간보고서</a>
+  # → <a> 태그로 텍스트 매칭 (get_by_text 우선 사용)
+  report_list_item: "table td a, [role='row'] a, [role='gridcell'] a"
+
+# ── 날짜 범위 ────────────────────────────────────────────────────────────────
+# 확인된 UI:
+#   주간보고서: "최근 30일: 2026. 5. 19.~2026. 6. 17." 버튼
+#   지면 확인(피벗):  "2026.3.9~2026.4.6." 형식 (상대 텍스트 없이 날짜만 표시)
+period:
+  date_range_button: |
+    [aria-label*='날짜 범위'], [aria-label*='기간 선택'], [aria-label*='date range'],
+    button:has-text('최근'), [role='button']:has-text('최근'),
+    [role='button']:has-text('지난'), button:has-text('지난'),
+    [aria-label*='최근'],
+    [role='button']:has-text('~'), button:has-text('~')
+
+  # 캘린더 날짜 셀: aria-label="Monday, 15 June 2026" 형식 (영어)
+  # 코드에서 aria-label*="15 June 2026" 부분 매칭으로 클릭
+  calendar_day_selector: "[role='button'][aria-label*='{day_label}']"
+
+  # 업데이트 버튼 (캘린더 하단 취소/업데이트 쌍 중 두 번째)
+  # 확인된 텍스트: "업데이트" (Meta 한국어 UI)
+  apply_button: "[data-surface='/am/date_picker'] [role='button']:has-text('업데이트'), [role='button']:has-text('업데이트'), [data-surface='/am/date_picker'] [role='button']:has-text('적용'), [role='button']:has-text('적용')"
+
+# ── 다운로드 (내보내기) ──────────────────────────────────────────────────────
+# 확인된 HTML (Screenshot 4 DevTools):
+#   <div aria-busy="false" ... role="button" tabindex="0"
+#        data-surface="am/lib:export_button" id="js_10g">
+#   <span id="export_button" ...>
+# 위치: 보고서 뷰 상단 우측 "내보내기" 버튼 (강조 표시)
+download:
+  button: "[data-surface='am/lib:export_button']"
+  button_fallback: "#export_button, [aria-label*='내보내기'], [role='button']:has-text('내보내기')"
+
+  # 내보내기 클릭 후 나타나는 모달 다이얼로그의 확인 버튼
+  # 확인된 HTML: data-surface="/am/lib:ads_report_builder_export_dialog_modal_.../lib:export-confirm-button"
+  export_dialog_confirm: "[data-surface*='export-confirm-button']"
+
+  timeout_sec: 120

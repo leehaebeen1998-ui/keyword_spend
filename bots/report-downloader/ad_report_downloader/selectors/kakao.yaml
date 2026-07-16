@@ -1,0 +1,87 @@
+# 카카오 키워드광고 관리자센터 맞춤보고서 셀렉터
+# https://keywordad.kakao.com
+# ※ 확인된 HTML 기반 (DevTools) — BEM 시맨틱 클래스명은 안정적
+# ※ 구 moment.kakao.com(모먼트) 아님 — keywordad.kakao.com(키워드광고) 기준
+
+base_url: "https://keywordad.kakao.com"
+
+# ── 로그인 확인 ──────────────────────────────────────────────────────────────
+# 확인된 로그인 페이지 (Screenshot 2):
+#   accounts.kakao.com 로그인 폼
+#   <input id="loginId--1" name="loginId" type="text" autocomplete="webauthn">
+login:
+  login_url_patterns:
+    - "accounts.kakao.com"
+    - "kakao.com/oauth"
+  login_element_selector: "input#loginId--1, input[name='loginId']"
+  # 자동 로그인용 폼 셀렉터
+  id_input: "input#loginId--1, input[name='loginId'], input[type='email'], input[type='text']"
+  pw_input: "input[name='password'], input[type='password']"
+  submit_button: "button[type='submit']:has-text('로그인'), button.btn_g:has-text('로그인'), button:has-text('로그인')"
+
+# ── 계정 전환 ────────────────────────────────────────────────────────────────
+# 방법: /{account_id}/report 직접 URL 이동
+# 확인된 URL 패턴 (Screenshot 7):
+#   https://keywordad.kakao.com/320272/report  (맞춤보고서 전체 페이지)
+#
+# config.json 필수 필드:
+#   account_id : 숫자 광고계정 ID (예: "320272")
+#                Screenshot 5 테이블 "광고계정 ID" 컬럼 값
+account_switch:
+  # 계정별 보고서 직접 URL (account_id 치환)
+  report_url_with_account: "/{account_id}/report"
+
+  # 계정 목록 페이지에서 계정명 클릭 방식 (fallback)
+  # 확인된 HTML (Screenshot 5 DevTools):
+  #   <a class="link_txt txt_limit">마약</a>
+  #   in: td.align_l > div.inner_tbl
+  account_link: "a.link_txt.txt_limit"
+
+# ── 보고서 이동 ──────────────────────────────────────────────────────────────
+report:
+  # account_id 없을 때 fallback URL
+  report_url_path: "/report"
+
+  # 사이드바 "보고서" 메뉴 (Screenshot 6 좌측 사이드바)
+  # 확인된 HTML (Screenshot 6 DevTools):
+  #   <a href="#none" class="link_snb"> ... </a>
+  #   in: nav.cont_snb > ul.list_snb > li > a.link_snb
+  sidebar_report: "nav.cont_snb a.link_snb:has-text('보고서'), ul.list_snb a:has-text('보고서')"
+
+  # 맞춤보고서 목록 링크 (Screenshot 7)
+  # 확인된 HTML (Screenshot 7 DevTools):
+  #   <a class="link_txt limit_line" href="/320272/report/KEYWORD/4318610961363927044">
+  report_list_link: "a.link_txt.limit_line[href*='/report/KEYWORD/'], a.link_txt.limit_line"
+
+# ── 날짜 범위 ────────────────────────────────────────────────────────────────
+# 확인된 UI: 달력 버튼 클릭 → ul.list_period 드롭다운 (오늘/어제/이번주/../맞춤 설정)
+#             "맞춤 설정" 클릭 → div.date_calendar 입력창 표시
+# 확인된 DevTools:
+#   드롭다운: ul.list_period li:has-text('맞춤 설정')
+#   적용 버튼: button.btn_gm.gm_bl > span.inner_g > "적용"
+#              위치: .calendar_layer .date_calendar .btn_wrap
+period:
+  date_range_button: "div.btn_gm.gm_calendar.freeset_calendar, a.link_calendar, button.btn_gm.gm_calendar"
+  # 달력 클릭 후 나타나는 프리셋 드롭다운에서 "맞춤 설정" 선택
+  custom_range_option: "ul.list_period li:has-text('맞춤 설정'), .list_period li:has-text('맞춤 설정')"
+  start_input: "input.inp_g[id*='start'], input[placeholder*='시작'], .date_calendar input:first-of-type"
+  end_input:   "input.inp_g[id*='end'],   input[placeholder*='종료'], .date_calendar input:last-of-type"
+  prev_month_btn: "button.btn_prev, a.btn_prev, [class*='prev'][class*='month']"
+  next_month_btn: "button.btn_next, a.btn_next, [class*='next'][class*='month']"
+  day_cell: "td.td_date, td[data-date], table.calendar_body td"
+  # 확인된 DevTools: 우하단 파란 "적용" 버튼
+  apply_button: ".calendar_layer button:has-text('적용'), .date_calendar button:has-text('적용'), .btn_wrap button:has-text('적용'), button.btn_gm.gm_bl, button:has-text('적용')"
+  date_format: "YYYY.MM.DD"
+
+# ── 다운로드 ─────────────────────────────────────────────────────────────────
+# 확인된 HTML (Screenshot 8 DevTools):
+#   <button type="button" class="btn_gm gm_line" style="user-select: none;">
+#     <span class="inner_g icon_g">
+#       <span class="ico_comm ico_download">다운로드</span>
+#     </span>
+#   </button>
+# 위치: 맞춤보고서 수정 페이지 상단 우측
+download:
+  button: "button.btn_gm.gm_line:has(span.ico_comm.ico_download)"
+  button_fallback: "button:has(span.ico_download), button:has-text('\ub2e4\uc6b4\ub85c\ub4dc')"
+  timeout_sec: 90

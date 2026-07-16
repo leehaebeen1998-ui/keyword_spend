@@ -1,3 +1,4 @@
+"""브랜드 템플릿 반영 로직. 최근 수정: 2026-07-16 (작업 기간 시트 필터 + 롤링 시트 숨김)."""
 from __future__ import annotations
 
 import csv
@@ -66,6 +67,7 @@ def write_brand_template(
     update_mode: str = "replace",
     category_mode: str = "category_sheets",
     rule: BrandUploadRule | None = None,
+    allowed_dates: Iterable[Any] | None = None,
 ) -> TemplateWriteResult:
     rule = rule if rule is not None else _brand_rule_for_upload(brand=brand, rows=rows)
     template = Path(template_path)
@@ -73,9 +75,9 @@ def write_brand_template(
     suffix = template.suffix.lower()
 
     if suffix == ".xlsx":
-        return write_xlsx_template(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode, category_mode=category_mode)
+        return write_xlsx_template(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode, category_mode=category_mode, allowed_dates=allowed_dates)
     if suffix == ".xlsb":
-        return write_xlsb_template_with_excel(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode, category_mode=category_mode)
+        return write_xlsb_template_with_excel(rule=rule, template_path=template, output_path=output, rows=rows, run_date=run_date, update_mode=update_mode, category_mode=category_mode, allowed_dates=allowed_dates)
     raise ValueError(f"Unsupported template type: {template.suffix}")
 
 
@@ -109,6 +111,7 @@ def write_xlsx_template(
     run_date: str | date | datetime | None = None,
     update_mode: str = "replace",
     category_mode: str = "category_sheets",
+    allowed_dates: Iterable[Any] | None = None,
 ) -> TemplateWriteResult:
     try:
         from copy import copy
@@ -118,7 +121,7 @@ def write_xlsx_template(
 
     current = parse_run_date(run_date)
     workbook = load_workbook(template_path)
-    targets = _single_sheet_targets(rows, rule, current) if category_mode == "single_sheet" else _build_sheet_targets_for_rows(rule, current, rows)
+    targets = _single_sheet_targets(rows, rule, current) if category_mode == "single_sheet" else _build_sheet_targets_for_rows(rule, current, rows, allowed_dates=allowed_dates)
     touched: list[str] = []
     written = 0
     missing_sheets: list[str] = []
@@ -165,6 +168,10 @@ def write_xlsx_template(
             written += 1
         touched.append(sheet_name)
 
+    # 2026-07-16: 롤링 브랜드는 이번 작업 시트만 보이게 하고 나머지 (N일) 시트는 숨긴다.
+    if rule.mode == "rolling_day_sheets" and category_mode != "single_sheet":
+        _apply_rolling_visibility_openpyxl(workbook, [target.sheet_name for target in targets])
+
     output = Path(output_path)
     _ensure_directory(output.parent)
     _save_openpyxl_workbook(workbook, output)
@@ -194,9 +201,10 @@ def write_xlsb_template_with_excel(
     run_date: str | date | datetime | None = None,
     update_mode: str = "replace",
     category_mode: str = "category_sheets",
+    allowed_dates: Iterable[Any] | None = None,
 ) -> TemplateWriteResult:
     current = parse_run_date(run_date)
-    sheet_targets = _single_sheet_targets(rows, rule, current) if category_mode == "single_sheet" else _build_sheet_targets_for_rows(rule, current, rows)
+    sheet_targets = _single_sheet_targets(rows, rule, current) if category_mode == "single_sheet" else _build_sheet_targets_for_rows(rule, current, rows, allowed_dates=allowed_dates)
     targets = [
         {
             "sheet_name": target.sheet_name,
@@ -209,12 +217,18 @@ def write_xlsb_template_with_excel(
     ]
     output = Path(output_path)
     _ensure_directory(output.parent)
+    # 2026-07-16: 롤링(태하형)은 이번 작업 기간의 시트만 보이게 하고
+    # 나머지 (N일)/(N일)_구글 시트는 숨긴다.
+    rolling_visible_sheets: list[str] = []
+    if rule.mode == "rolling_day_sheets" and category_mode != "single_sheet":
+        rolling_visible_sheets = sorted({target.sheet_name for target in sheet_targets})
     payload = {
         "template_path": os.fspath(Path(template_path)),
         "output_path": os.fspath(output),
         "targets": targets,
         "headers": HEADER_ALIASES,
         "update_mode": update_mode,
+        "rolling_visible_sheets": rolling_visible_sheets,
     }
 
     with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as file:
@@ -255,9 +269,34 @@ def write_xlsb_template_with_excel(
         written_rows=written,
         touched_sheets=touched,
         skipped_rows=len(rows) - written,
-        expected_sheet_names=tuple(target["sheet_name"] for target in sheet_targets),
+        expected_sheet_names=tuple(target.sheet_name for target in sheet_targets),
         available_row_dates=available_row_dates,
     )
+
+
+# "카테고리(N일)" 또는 "카테고리(N일)_구글" 형태의 롤링 시트명 패턴
+_ROLLING_SHEET_PATTERN = re.compile(r"\(\d+일\)(_구글)?$")
+
+
+def _apply_rolling_visibility_openpyxl(workbook: Any, visible_names: Iterable[str]) -> None:
+    """롤링 시트 중 이번 작업 시트만 보이게 하고 나머지는 숨긴다.
+
+    롤링 패턴이 아닌 시트(요약 시트 등)는 건드리지 않는다. 보이게 남길 시트를
+    하나도 찾지 못하면(시트명 불일치 등) 전부 숨겨져 파일이 깨질 수 있으므로
+    아무것도 바꾸지 않는다.
+    """
+    visible = {_normalize(name) for name in visible_names}
+    rolling_sheets = [ws for ws in workbook.worksheets if _ROLLING_SHEET_PATTERN.search(str(ws.title))]
+    matched = [ws for ws in rolling_sheets if _normalize(ws.title) in visible]
+    if not matched:
+        return
+    first_visible = matched[0]
+    for worksheet in rolling_sheets:
+        worksheet.sheet_state = "visible" if _normalize(worksheet.title) in visible else "hidden"
+    try:
+        workbook.active = first_visible
+    except Exception:
+        pass
 
 
 def _rows_for_target(rows: Iterable[dict[str, Any]], target: SheetTarget) -> list[dict[str, Any]]:
@@ -373,8 +412,49 @@ def _dedupe_value(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _build_sheet_targets_for_rows(rule: BrandUploadRule, current: date, rows: list[dict[str, Any]]) -> list[SheetTarget]:
+def _build_sheet_targets_for_rows(
+    rule: BrandUploadRule,
+    current: date,
+    rows: list[dict[str, Any]],
+    allowed_dates: Iterable[Any] | None = None,
+) -> list[SheetTarget]:
     targets = build_sheet_targets(rule, current)
+
+    if rule.mode == "rolling_day_sheets":
+        # 2026-07-14: 롤링(태하형)에서 매 실행마다 (1일)~(rolling_days일) 시트를
+        # 전부 대상으로 잡던 문제 수정. replace 모드에서는 대상 시트에 쓸 행이
+        # 없어도 기존 내용을 지우기 때문에, 평일 1일치 실행이 (2일)~(7일) 시트의
+        # 데이터를 비워 버렸다.
+        # 2026-07-16: raw에 작업 기간 밖의 날짜가 섞여 있으면(예: 폴더에 이전
+        # 다운로드가 남아 있거나 다운로더가 여러 날짜를 받은 경우) 그 시트까지
+        # 열리던 문제 보강. allowed_dates(이번 실행의 다운로드 기간)가 주어지면
+        # "raw에 있는 날짜 ∩ 작업 기간"의 시트만 대상으로 한다.
+        # 평일 -> (1일)만, 월요일(금~일 캐치업) -> (1일)~(3일), 공휴일 수동 기간 ->
+        # 그 기간 날짜 수만큼만 선택된다.
+        row_dates = {
+            parsed
+            for parsed in (_parse_row_date(_first(row, "date", "날짜", "일자")) for row in rows)
+            if parsed is not None
+        }
+        allowed = {
+            parsed
+            for parsed in (_parse_row_date(value) for value in (allowed_dates or ()))
+            if parsed is not None
+        }
+        if allowed:
+            # 작업 기간이 명시되면 기간 밖 시트는 절대 열지 않는다. 기간 내
+            # 날짜 중 raw에 실제로 존재하는 날짜만 쓰고, 교집합이 비면 기간
+            # 전체를 대상으로 남겨 "반영 0행" 진단이 정확히 드러나게 한다.
+            pick = (row_dates & allowed) or allowed
+        else:
+            # 작업 기간 정보가 없으면(구형 CLI 등) raw 날짜 기준으로만 제한한다.
+            pick = row_dates
+        if pick:
+            filtered = [target for target in targets if target.report_date in pick]
+            if filtered:
+                return filtered
+        return targets
+
     if rule.mode != "fixed_today_offset" or any(_rows_for_target(rows, target) for target in targets):
         return targets
 
@@ -828,6 +908,35 @@ try {
       if ($field -eq 'conversions') { $writeRange.NumberFormat = '0;-0;-' }
       if ($field -eq 'conversion_rate') { $writeRange.NumberFormat = '0.00%;-0.00%;-' }
       if ($field -eq 'cost_per_conversion') { $writeRange.NumberFormat = '#,##0;-#,##0;-' }
+    }
+  }
+  # 2026-07-16: 롤링 브랜드는 이번 작업 시트만 보이게 하고 나머지 (N일) 시트는 숨긴다.
+  # rolling_visible_sheets가 비어 있으면(오현형/일로형 등) 아무것도 바꾸지 않는다.
+  $visibleNames = @()
+  if ($payload.PSObject.Properties['rolling_visible_sheets'] -and $null -ne $payload.rolling_visible_sheets) {
+    foreach ($name in @($payload.rolling_visible_sheets)) { $visibleNames += (Normalize-SheetName $name) }
+  }
+  if ($visibleNames.Count -gt 0) {
+    $rollingPattern = '\([0-9]+일\)(_구글)?$'
+    $matchedVisible = 0
+    foreach ($sheet in $wb.Worksheets) {
+      if ((([string]$sheet.Name) -match $rollingPattern) -and ($visibleNames -contains (Normalize-SheetName $sheet.Name))) { $matchedVisible++ }
+    }
+    # 보이게 남길 시트를 하나도 찾지 못하면(시트명 불일치 등) 전부 숨겨져 파일이
+    # 깨질 수 있으므로 숨김 처리를 건너뛴다.
+    if ($matchedVisible -gt 0) {
+      $firstVisible = $null
+      foreach ($sheet in $wb.Worksheets) {
+        if (([string]$sheet.Name) -match $rollingPattern) {
+          if ($visibleNames -contains (Normalize-SheetName $sheet.Name)) {
+            try { $sheet.Visible = -1 } catch {}
+            if ($null -eq $firstVisible) { $firstVisible = $sheet }
+          } else {
+            try { $sheet.Visible = 0 } catch {}
+          }
+        }
+      }
+      if ($null -ne $firstVisible) { try { $firstVisible.Activate() } catch {} }
     }
   }
   try { $wb.ForceFullCalculation = $true } catch {}

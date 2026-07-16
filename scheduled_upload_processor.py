@@ -78,6 +78,7 @@ def main() -> None:
         folder_date=folder_date,
         window=window,
         downloader_command=str(config.get("downloader_command") or ""),
+        downloader_brand=str(config.get("downloader_brand") or ""),
     )
     _log(config_path, f"[완료] 업로드 CSV 생성: {folder_result.output_path}")
     _log(config_path, f"  raw 파일 수: {len(folder_result.raw_files)}")
@@ -100,6 +101,8 @@ def main() -> None:
             rows=rows,
             run_date=run_date,
             rule=rule,
+            # 2026-07-16: 이번 실행의 다운로드 기간에 포함된 날짜의 시트만 연다.
+            allowed_dates=_expected_dates(window),
         )
         if template_result.written_rows <= 0:
             raise ValueError(_zero_rows_diagnostic(template_result))
@@ -118,6 +121,7 @@ def _ensure_raw_available(
     folder_date: str,
     window,
     downloader_command: str,
+    downloader_brand: str = "",
 ):
     """GUI의 `_process_folder`와 동일한 2단계 재시도 흐름.
 
@@ -147,6 +151,7 @@ def _ensure_raw_available(
             folder_date=folder_date,
             window=window,
             downloader_command=downloader_command,
+            downloader_brand=downloader_brand,
         )
 
     if not missing_dates:
@@ -162,6 +167,7 @@ def _ensure_raw_available(
         folder_date=folder_date,
         window=window,
         downloader_command=downloader_command,
+        downloader_brand=downloader_brand,
     )
     missing_dates = _missing_expected_dates(result, window)
     if missing_dates:
@@ -179,8 +185,9 @@ def _run_downloader_until_raw_available(
     folder_date: str,
     window,
     downloader_command: str,
+    downloader_brand: str = "",
 ):
-    _prepare_bundled_downloader_config(config_path, brand=brand, window=window)
+    _prepare_bundled_downloader_config(config_path, brand=brand, window=window, downloader_brand=downloader_brand)
 
     command = _normalize_external_command(downloader_command)
     if not command:
@@ -196,9 +203,19 @@ def _run_downloader_until_raw_available(
     )
     _log(config_path, f"[started] 다운로더 pid={process.pid}")
 
+    # 2026-07-14: 레이스 컨디션 수정. 같은 날짜의 raw가 계정/매체별로 여러 개
+    # 내려오는 브랜드(태하 등)는 첫 파일 하나만 저장된 시점에 이미 "날짜 충족"
+    # 조건이 참이 되어, 나머지 파일을 무시하고 처리가 시작되는 문제가 있었다.
+    # 이제 다운로더 프로세스가 완전히 종료된 뒤의 폴더 스캔 결과만 최종본으로
+    # 인정한다.
     deadline = time.monotonic() + DOWNLOADER_TIMEOUT_SEC
     last_log = 0.0
+    dates_ready_once = False
     while time.monotonic() < deadline:
+        # 폴더 스캔 "전"에 종료 여부를 기록한다. 스캔 후에 확인하면 스캔과 확인
+        # 사이에 마지막 파일이 저장되고 프로세스가 종료됐을 때 그 파일이 빠진
+        # 결과를 최종본으로 오인할 수 있다.
+        downloader_finished = process.poll() is not None
         try:
             result = process_download_folder(
                 brand=brand,
@@ -208,7 +225,7 @@ def _run_downloader_until_raw_available(
                 folder_date=folder_date,
             )
         except FileNotFoundError:
-            if process.poll() is not None and process.returncode not in (0, None):
+            if downloader_finished and process.returncode not in (0, None):
                 raise RuntimeError(f"다운로더가 raw 파일 생성 전에 code {process.returncode}로 종료되었습니다.")
             now = time.monotonic()
             if now - last_log >= LOG_INTERVAL_SEC:
@@ -219,7 +236,7 @@ def _run_downloader_until_raw_available(
 
         missing_dates = _missing_expected_dates(result, window)
         if missing_dates:
-            if process.poll() is not None and process.returncode not in (0, None):
+            if downloader_finished and process.returncode not in (0, None):
                 raise RuntimeError(
                     f"다운로더가 code {process.returncode}로 종료됐지만 누락된 날짜가 남아 있습니다: {', '.join(missing_dates)}"
                 )
@@ -230,19 +247,47 @@ def _run_downloader_until_raw_available(
             time.sleep(POLL_INTERVAL_SEC)
             continue
 
-        _log(config_path, "[auto] 다운로더 실행 후 raw 파일 확인됨.")
+        if not downloader_finished:
+            dates_ready_once = True
+            now = time.monotonic()
+            if now - last_log >= LOG_INTERVAL_SEC:
+                _log(config_path, f"[auto] 날짜 데이터는 확인됐지만({len(result.raw_files)}개 파일) 다운로더가 아직 실행 중입니다. 종료 대기...")
+                last_log = now
+            time.sleep(POLL_INTERVAL_SEC)
+            continue
+
+        _log(config_path, f"[auto] 다운로더 종료 확인. raw 파일 {len(result.raw_files)}개 처리.")
+        return result
+
+    if dates_ready_once:
+        # 다운로더가 30분 내에 종료되지 않았지만 날짜 데이터는 모두 확인된 상태.
+        # 지금 시점의 폴더를 한 번 더 스캔한 결과를 사용한다(그 사이 추가 저장분 반영).
+        result = process_download_folder(
+            brand=brand,
+            download_folder=download_folder,
+            rules_path=rules_path,
+            output_path=upload_csv,
+            folder_date=folder_date,
+        )
+        _log(
+            config_path,
+            f"[warning] 다운로더가 30분 내에 종료되지 않아 현재 시점 스캔 결과({len(result.raw_files)}개 파일)로 진행합니다. 데이터 누락 여부를 확인해 주세요.",
+        )
         return result
 
     raise TimeoutError("다운로더 실행 후 30분 내에 raw 파일을 찾지 못했습니다.")
 
 
-def _prepare_bundled_downloader_config(config_path: Path, *, brand: str, window) -> None:
+def _prepare_bundled_downloader_config(config_path: Path, *, brand: str, window, downloader_brand: str = "") -> None:
     """다운로더 봇의 config.json을 이번 예약 실행의 브랜드/기간에 맞춘다.
 
     GUI의 `_prepare_bundled_downloader`와 동일하게, active_brand/brand_name/media를
     이 스케줄이 대상으로 하는 브랜드로 강제 전환한다. 이걸 안 하면 다운로더가
     직전에 GUI에서 마지막으로 선택했던(또는 다른 예약이 마지막으로 설정한) 엉뚱한
     브랜드의 계정을 받아올 수 있다.
+
+    `downloader_brand`가 지정돼 있으면(예약 저장 시 GUI의 '다운로더 봇 브랜드'
+    콤보박스에서 수동 선택한 값) 자동 별칭 매칭보다 그 값을 우선한다.
     """
     downloader_config_path = _bundled_downloader_config_path()
     if not downloader_config_path.exists():
@@ -264,27 +309,43 @@ def _prepare_bundled_downloader_config(config_path: Path, *, brand: str, window)
         "end": window.end_date.strftime("%Y-%m-%d"),
     }
 
-    downloader_brand = _downloader_brand_name(brand, data)
-    if downloader_brand:
-        data["active_brand"] = downloader_brand
-        data["brand_name"] = downloader_brand
+    explicit_downloader_brand = str(downloader_brand or "").strip()
+    resolved_brand = explicit_downloader_brand or _downloader_brand_name(brand, data)
+    if resolved_brand:
+        data["active_brand"] = resolved_brand
+        data["brand_name"] = resolved_brand
         for entry in data.get("brands", []):
-            if str(entry.get("name") or "").strip() == downloader_brand:
+            if str(entry.get("name") or "").strip() == resolved_brand:
                 media = entry.get("media")
                 if isinstance(media, dict):
                     data["media"] = media
                 break
 
     _atomic_write_text(downloader_config_path, json.dumps(data, ensure_ascii=False, indent=2))
-    _log(config_path, f"[ready] 다운로더 브랜드={downloader_brand or brand}, 저장 폴더={download_root}")
+    enabled_media = [
+        k for k, v in data.get("media", {}).items()
+        if isinstance(v, dict) and v.get("enabled", True)
+    ]
+    brand_source = "수동 선택" if explicit_downloader_brand else "자동 별칭 매칭"
+    _log(
+        config_path,
+        f"[ready] 다운로더 브랜드: '{brand}' -> '{resolved_brand}' ({brand_source}) "
+        f"/ 기간: {window.start_date} ~ {window.end_date} "
+        f"/ 매체: {', '.join(enabled_media) or '(없음)'}, 저장 폴더={download_root}",
+    )
 
 
-def _missing_expected_dates(result, window) -> list[str]:
+def _expected_dates(window) -> list[str]:
     expected: list[str] = []
     current = window.start_date
     while current <= window.end_date:
         expected.append(current.strftime("%Y%m%d"))
         current += timedelta(days=1)
+    return expected
+
+
+def _missing_expected_dates(result, window) -> list[str]:
+    expected = _expected_dates(window)
     available = set(getattr(result, "date_counts", {}) or {})
     return [date_key for date_key in expected if date_key not in available]
 

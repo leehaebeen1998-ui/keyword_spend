@@ -72,6 +72,9 @@ def infer_media(path: Path) -> str:
     name = path.name.lower()
     if "google sa" in text or "google_sa" in text or name.startswith("google_sa"):
         return "Google SA"
+    # 2026-07-13: Google DA 파일이 인식되지 않아 처리에서 통째로 빠지던 문제 수정
+    if "google da" in text or "google_da" in text or name.startswith("google_da"):
+        return "Google DA"
     if "/naver/" in text or "naver" in name:
         return "Naver"
     if "일로 데일리" in path.name:

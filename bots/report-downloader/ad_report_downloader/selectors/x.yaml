@@ -1,0 +1,57 @@
+﻿# X (Twitter) Ads 셀렉터
+base_url: "https://ads.x.com"
+
+login:
+  login_url_patterns:
+    - "twitter.com/login"
+    - "x.com/i/flow/login"
+    - "x.com/login"
+    - "accounts.twitter.com"
+    - "business.x.com/ko"
+  login_element_selector: "input[autocomplete='username'], input[name='text'], input[type='password']"
+
+tabs:
+  ads_tab: >
+    a:has-text('Ads'),
+    button:has-text('Ads'),
+    [role='tab']:has-text('Ads'),
+    li:has-text('Ads'),
+    [class*='tab']:has-text('Ads'),
+    [class*='Tab']:has-text('Ads'),
+    span:has-text('Ads')
+
+date_picker:
+  trigger: >
+    button[data-slot='popover-trigger'][aria-haspopup='dialog'],
+    button[aria-haspopup='dialog']:has(svg),
+    button:has-text('최근 7일'),
+    button:has-text('최근 14일'),
+    button:has-text('최근 30일'),
+    button:has-text('Last 7'),
+    button:has-text('Last 14'),
+    button:has-text('Last 30'),
+    [class*='date-range']:has(button),
+    button[class*='date']
+
+export:
+  download_icon: >
+    button[title='내보내기'],
+    button[data-slot='dropdown-menu-trigger']:has(svg)
+  new_export_item: >
+    [data-slot='dropdown-menu-item']:has-text('새 내보내기 생성'),
+    [role='menuitem']:has-text('새 내보내기 생성')
+  dialog: "[data-slot='sheet-content'], [role='dialog'][data-state='open']"
+  daily_option: >
+    button:has-text('매일 보내기'),
+    button:has-text('One row per day')
+  submit_button: >
+    button[data-slot='button'][data-variant='default']:has-text('내보내기'),
+    button[data-variant='default']:has-text('내보내기'),
+    button:has-text('Export')
+  past_downloads_item: >
+    [data-slot='dropdown-menu-item']:has-text('과거 다운로드'),
+    [role='menuitem']:has-text('과거 다운로드')
+  past_download_link: "a[download], a[href*='download'], a[href*='export']"
+
+download:
+  timeout_sec: 180

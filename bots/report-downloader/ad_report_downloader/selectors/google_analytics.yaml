@@ -1,0 +1,45 @@
+﻿# Google Analytics 4 탐색 분석 셀렉터
+# https://analytics.google.com
+
+base_url: "https://analytics.google.com/analytics/web/"
+
+login:
+  login_url_patterns:
+    - "accounts.google.com"
+    - "google.com/signin"
+    - "google.com/ServiceLogin"
+  login_element_selector: "input[type='email'], input[name='identifier']"
+
+explore_list:
+  report_card: >
+    div[class*='entry-title-short']:has-text('{report_name}'),
+    div[class*='entry-title']:has-text('{report_name}'),
+    [class*='saved-analysis-list-table-row']:has-text('{report_name}')
+
+date_range:
+  section_trigger: >
+    div.primary-date-range-text,
+    div.primary-date-range-key,
+    div.selected-date,
+    button.mat-unthemed:has(div.selected-date)
+  custom_option: >
+    span:has-text('맞춤'),
+    li:has-text('맞춤'),
+    [class*='date-range-option']:has-text('맞춤'),
+    span:has-text('Custom'),
+    li:has-text('Custom')
+  apply_button: >
+    button:has-text('적용'),
+    button:has-text('Apply')
+
+export:
+  export_button: >
+    button[aria-label*='내보내기'],
+    button[aria-label*='다운로드'],
+    button[aria-label*='Export'],
+    button[aria-label*='Download']
+  csv_option: >
+    [role='menuitem']:has-text('CSV'),
+    button:has-text('CSV'),
+    span:has-text('CSV')
+  timeout_sec: 120

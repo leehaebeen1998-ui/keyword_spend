@@ -1,0 +1,30 @@
+# mobion 셀렉터 설정
+# ※ UI 변경 시 이 파일만 수정하면 코드 수정 불필요 (PRD §4.4)
+# ※ 개발 착수 전 실제 화면 캡처 후 채워넣으세요
+
+base_url: "https://www.mobion.co.kr"
+
+login:
+  # 이 URL 패턴이 감지되면 LoginRequiredError 발생
+  login_url_pattern: ""
+  # 또는 이 요소가 화면에 있으면 로그인 필요 판단
+  login_element_selector: ""
+
+report:
+  # 좌측/상단 메뉴에서 보고서 화면 진입
+  menu_selector: ""
+  # 보고서 종류 선택 탭 또는 드롭다운
+  report_type_selector: ""
+
+period:
+  # 기간 선택 입력 필드
+  start_date_selector: ""
+  end_date_selector: ""
+  # 적용 버튼 (없으면 빈칸)
+  apply_button_selector: ""
+
+download:
+  # 다운로드 버튼 (클릭 시 파일 다운로드 시작)
+  download_button_selector: ""
+  # 다운로드 타임아웃 (초) — config.json 값이 우선
+  timeout_sec: 90

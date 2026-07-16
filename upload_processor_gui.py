@@ -66,6 +66,7 @@ class UploadProcessorApp(tk.Tk):
         self.run_date_var = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
         self.login_command_var = tk.StringVar()
         self.downloader_command_var = tk.StringVar()
+        self.downloader_brand_var = tk.StringVar()
         self.spreadsheet_url_var = tk.StringVar(value=DEFAULT_TEST_SPREADSHEET_URL)
         self.spreadsheet_sheet_var = tk.StringVar(value=DEFAULT_TEST_SPREADSHEET_SHEET)
         self.spreadsheet_credentials_var = tk.StringVar()
@@ -90,49 +91,73 @@ class UploadProcessorApp(tk.Tk):
         self._set_default_paths(force_empty_only=True)
         self._set_default_download_folder()
         self._refresh_schedule()
+        self._refresh_downloader_brand_choices()
 
     def _build(self) -> None:
+        # 2026-07-16: 간편 모드 도입. 첫 화면은 [브랜드 선택 + 전체 실행 + 로그]만
+        # 보여주고, 경로/기간/규칙/스프레드시트 등 상세 설정은 "고급 설정" 버튼으로
+        # 펼치는 구조. 기존 위젯/변수/동작은 그대로 유지된다(부모 프레임만 이동).
         outer = ttk.Frame(self, padding=12)
         outer.pack(fill="both", expand=True)
-        outer.columnconfigure(1, weight=1)
+        outer.columnconfigure(0, weight=1)
 
-        row = 0
-        ttk.Label(outer, text="브랜드").grid(row=row, column=0, sticky="w", pady=4)
+        # ── 공통 상단: 브랜드 선택 ─────────────────────────────────────
+        top = ttk.Frame(outer)
+        top.grid(row=0, column=0, sticky="ew")
+        top.columnconfigure(1, weight=1)
+        ttk.Label(top, text="브랜드").grid(row=0, column=0, sticky="w", pady=4)
         self.brand_combo = ttk.Combobox(
-            outer,
+            top,
             textvariable=self.brand_var,
             values=self._brand_values(),
             width=28,
         )
-        self.brand_combo.grid(row=row, column=1, sticky="w", pady=4)
+        self.brand_combo.grid(row=0, column=1, sticky="w", pady=4)
         self.brand_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_brand_changed())
-        brand_buttons = ttk.Frame(outer)
-        brand_buttons.grid(row=row, column=2, sticky="e", padx=(8, 0), pady=4)
+        brand_buttons = ttk.Frame(top)
+        brand_buttons.grid(row=0, column=2, sticky="e", padx=(8, 0), pady=4)
         ttk.Button(brand_buttons, text="브랜드 추가", command=self._add_brand).pack(side="left")
         ttk.Button(brand_buttons, text="설정 저장", command=self._save_current_profile).pack(side="left", padx=(6, 0))
+        self.advanced_toggle_button = ttk.Button(brand_buttons, text="고급 설정 열기", command=self._toggle_advanced)
+        self.advanced_toggle_button.pack(side="left", padx=(6, 0))
+
+        # ── 간편 모드 안내 ─────────────────────────────────────────────
+        self.simple_hint = ttk.Label(
+            outer,
+            text="브랜드를 확인하고 [전체 실행]을 누르면 다운로드 → CSV 생성 → 템플릿 반영 → 업로드까지 자동으로 진행됩니다.",
+            foreground="#666666",
+        )
+        self.simple_hint.grid(row=1, column=0, sticky="w", pady=(2, 6))
+
+        # ── 고급 설정 (기본 접힘) ─────────────────────────────────────
+        adv = ttk.Frame(outer)
+        self.advanced_frame = adv
+        adv.grid(row=2, column=0, sticky="ew")
+        adv.columnconfigure(1, weight=1)
+        self._advanced_visible = False
+
+        row = 0
+        self._path_row(adv, row, "다운로드 폴더", self.download_folder_var, self._choose_download_folder, extra_text="폴더 열기", extra_command=self._open_download_folder)
+        row += 1
+        self._path_row(adv, row, "규칙 파일", self.rules_path_var, self._choose_rules_file, extra_text="인덱스 열기", extra_command=self._open_index_editor)
+        row += 1
+        self._path_row(adv, row, "출력 루트", self.output_root_var, self._choose_output_root)
+        row += 1
+        self._path_row(adv, row, "업로드 CSV", self.upload_csv_var, self._choose_upload_csv_save)
 
         row += 1
-        self._path_row(outer, row, "다운로드 폴더", self.download_folder_var, self._choose_download_folder, extra_text="폴더 열기", extra_command=self._open_download_folder)
-        row += 1
-        self._path_row(outer, row, "규칙 파일", self.rules_path_var, self._choose_rules_file, extra_text="인덱스 열기", extra_command=self._open_index_editor)
-        row += 1
-        self._path_row(outer, row, "출력 루트", self.output_root_var, self._choose_output_root)
-        row += 1
-        self._path_row(outer, row, "업로드 CSV", self.upload_csv_var, self._choose_upload_csv_save)
+        ttk.Separator(adv).grid(row=row, column=0, columnspan=3, sticky="ew", pady=12)
 
         row += 1
-        ttk.Separator(outer).grid(row=row, column=0, columnspan=3, sticky="ew", pady=12)
+        ttk.Label(adv, text="실행 기준일").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Entry(adv, textvariable=self.run_date_var).grid(row=row, column=1, sticky="ew", pady=4)
+        ttk.Label(adv, text="비우면 오늘").grid(row=row, column=2, sticky="w", padx=(8, 0), pady=4)
 
         row += 1
-        ttk.Label(outer, text="실행 기준일").grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Entry(outer, textvariable=self.run_date_var).grid(row=row, column=1, sticky="ew", pady=4)
-        ttk.Label(outer, text="비우면 오늘").grid(row=row, column=2, sticky="w", padx=(8, 0), pady=4)
+        ttk.Separator(adv).grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 8))
 
         row += 1
-        ttk.Separator(outer).grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 8))
-
-        row += 1
-        self.notebook = ttk.Notebook(outer)
+        self.notebook = ttk.Notebook(adv)
         self.notebook.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         self._build_ohyun_tab()
         self._build_taeha_tab()
@@ -140,7 +165,7 @@ class UploadProcessorApp(tk.Tk):
         self.notebook.bind("<<NotebookTabChanged>>", lambda _event: self._on_tab_changed())
 
         row += 1
-        exchange = ttk.Frame(outer)
+        exchange = ttk.Frame(adv)
         exchange.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 4))
         ttk.Label(exchange, text="환율(USD→KRW)").pack(side="left")
         ttk.Label(exchange, textvariable=self.exchange_rate_status_var).pack(side="left", padx=(8, 8))
@@ -148,7 +173,7 @@ class UploadProcessorApp(tk.Tk):
         ttk.Button(exchange, text="해제", command=self._clear_exchange_rate).pack(side="left", padx=(6, 0))
 
         row += 1
-        integration = ttk.LabelFrame(outer, text="로그인 봇 / 다운로더 호출", padding=8)
+        integration = ttk.LabelFrame(adv, text="로그인 봇 / 다운로더 호출", padding=8)
         integration.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 4))
         integration.columnconfigure(1, weight=1)
         ttk.Label(integration, text="로그인 명령").grid(row=0, column=0, sticky="w")
@@ -157,9 +182,18 @@ class UploadProcessorApp(tk.Tk):
         ttk.Label(integration, text="다운로더 명령").grid(row=1, column=0, sticky="w", pady=(8, 0))
         ttk.Entry(integration, textvariable=self.downloader_command_var).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(8, 0))
         ttk.Button(integration, text="다운로더 실행", command=self._run_downloader).grid(row=1, column=2, sticky="e", pady=(8, 0))
+        ttk.Label(integration, text="다운로더 봇 브랜드").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.downloader_brand_combo = ttk.Combobox(
+            integration,
+            textvariable=self.downloader_brand_var,
+            values=[],
+        )
+        self.downloader_brand_combo.grid(row=2, column=1, sticky="ew", padx=(8, 8), pady=(8, 0))
+        ttk.Button(integration, text="새로고침", command=self._refresh_downloader_brand_choices).grid(row=2, column=2, sticky="e", pady=(8, 0))
+        ttk.Label(integration, text="다운로더 봇 config.json에 등록된 브랜드명 중 선택. 비우면 이 프로그램 브랜드명으로 자동 판단합니다.").grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
         row += 1
-        schedule = ttk.LabelFrame(outer, text="스케줄", padding=8)
+        schedule = ttk.LabelFrame(adv, text="스케줄", padding=8)
         schedule.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 4))
         schedule.columnconfigure(5, weight=1)
         ttk.Label(schedule, text="모드").grid(row=0, column=0, sticky="w", padx=(0, 6))
@@ -186,24 +220,45 @@ class UploadProcessorApp(tk.Tk):
         ttk.Button(schedule_buttons, text="예약 등록", command=self._run_register_schedule).pack(side="left")
         ttk.Button(schedule_buttons, text="예약 확인", command=self._run_check_schedule).pack(side="left", padx=(6, 0))
 
+        # 단계별 실행 버튼은 고급 설정 안으로 (간편 모드에서는 [전체 실행]만 노출)
         row += 1
-        buttons = ttk.Frame(outer)
-        buttons.grid(row=row, column=0, columnspan=3, sticky="e", pady=(12, 8))
-        ttk.Label(buttons, textvariable=self.status_var).pack(side="left", padx=(0, 16))
-        ttk.Button(buttons, text="1. 업로드 CSV 생성", command=self._run_process_folder).pack(side="left")
-        ttk.Button(buttons, text="2. 템플릿 반영", command=self._run_template_update).pack(side="left", padx=(8, 0))
-        ttk.Button(buttons, text="3. 스프레드시트 업로드", command=self._run_spreadsheet_upload).pack(side="left", padx=(8, 0))
-        ttk.Button(buttons, text="전체 실행", command=self._run_all).pack(side="left", padx=(8, 0))
+        step_buttons = ttk.Frame(adv)
+        step_buttons.grid(row=row, column=0, columnspan=3, sticky="e", pady=(8, 4))
+        ttk.Button(step_buttons, text="1. 업로드 CSV 생성", command=self._run_process_folder).pack(side="left")
+        ttk.Button(step_buttons, text="2. 템플릿 반영", command=self._run_template_update).pack(side="left", padx=(8, 0))
+        ttk.Button(step_buttons, text="3. 스프레드시트 업로드", command=self._run_spreadsheet_upload).pack(side="left", padx=(8, 0))
 
-        row += 1
+        adv.grid_remove()  # 기본은 간편 모드
+
+        # ── 공통 실행 줄 ───────────────────────────────────────────────
+        actions = ttk.Frame(outer)
+        actions.grid(row=3, column=0, sticky="ew", pady=(12, 8))
+        ttk.Label(actions, textvariable=self.download_window_var).pack(side="left")
+        ttk.Button(actions, text="전체 실행", command=self._run_all).pack(side="right")
+        ttk.Label(actions, textvariable=self.status_var).pack(side="right", padx=(0, 16))
+
+        # ── 공통 로그 ─────────────────────────────────────────────────
         log_frame = ttk.LabelFrame(outer, text="실행 로그", padding=8)
-        log_frame.grid(row=row, column=0, columnspan=3, sticky="nsew")
-        outer.rowconfigure(row, weight=1)
+        log_frame.grid(row=4, column=0, sticky="nsew")
+        outer.rowconfigure(4, weight=1)
         self.log_box = tk.Text(log_frame, height=12, wrap="word")
         self.log_box.pack(side="left", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_box.yview)
         self.log_box.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
+
+    def _toggle_advanced(self) -> None:
+        """간편 모드 <-> 고급 설정 전환. 위젯은 숨기기만 하므로 값/동작은 그대로다."""
+        if self._advanced_visible:
+            self.advanced_frame.grid_remove()
+            self.simple_hint.grid()
+            self.advanced_toggle_button.configure(text="고급 설정 열기")
+            self._advanced_visible = False
+        else:
+            self.advanced_frame.grid()
+            self.simple_hint.grid_remove()
+            self.advanced_toggle_button.configure(text="고급 설정 닫기")
+            self._advanced_visible = True
 
     def _build_ohyun_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=8)
@@ -364,6 +419,7 @@ class UploadProcessorApp(tk.Tk):
                 self.template_path_var.set("")
                 self.login_command_var.set(_default_login_command())
                 self.downloader_command_var.set(_default_downloader_command())
+                self.downloader_brand_var.set("")
                 self.spreadsheet_url_var.set("")
                 self.spreadsheet_sheet_var.set("")
                 self.spreadsheet_credentials_var.set("")
@@ -382,6 +438,7 @@ class UploadProcessorApp(tk.Tk):
             self.upload_csv_var.set(profile.upload_csv)
             self.login_command_var.set(profile.login_command or _default_login_command())
             self.downloader_command_var.set(profile.downloader_command or _default_downloader_command())
+            self.downloader_brand_var.set(profile.downloader_brand)
             self.spreadsheet_url_var.set(profile.spreadsheet_url)
             self.spreadsheet_sheet_var.set(profile.spreadsheet_sheet_name)
             self.spreadsheet_credentials_var.set(profile.spreadsheet_credentials_path)
@@ -416,6 +473,7 @@ class UploadProcessorApp(tk.Tk):
             upload_csv=self.upload_csv_var.get().strip(),
             login_command=self.login_command_var.get().strip(),
             downloader_command=self.downloader_command_var.get().strip(),
+            downloader_brand=self.downloader_brand_var.get().strip(),
             spreadsheet_url=self.spreadsheet_url_var.get().strip(),
             spreadsheet_sheet_name=self.spreadsheet_sheet_var.get().strip(),
             spreadsheet_credentials_path=self.spreadsheet_credentials_var.get().strip(),
@@ -674,15 +732,25 @@ class UploadProcessorApp(tk.Tk):
         self._launch_external_command("downloader", self.downloader_command_var.get().strip())
 
     def _run_downloader_until_raw_available(self):
+        # 2026-07-14: 레이스 컨디션 수정. 같은 날짜의 raw가 계정/매체별로 여러 개
+        # 내려오는 브랜드(태하 등)는 첫 파일 하나만 저장된 시점에 이미 "날짜 충족"
+        # 조건이 참이 되어, 나머지 파일을 무시하고 처리가 시작되는 문제가 있었다.
+        # 이제 다운로더 프로세스가 완전히 종료된 뒤의 폴더 스캔 결과만 최종본으로
+        # 인정한다.
         self._prepare_bundled_downloader()
         process = self._launch_external_command("downloader", self.downloader_command_var.get().strip())
         deadline = time.monotonic() + 1800
         last_log = 0.0
+        last_complete_result = None
         while time.monotonic() < deadline:
+            # 폴더 스캔 "전"에 종료 여부를 기록한다. 스캔 후에 확인하면 스캔과
+            # 확인 사이에 마지막 파일이 저장되고 프로세스가 종료됐을 때 그 파일이
+            # 빠진 결과를 최종본으로 오인할 수 있다.
+            downloader_finished = process.poll() is not None
             try:
                 result = self._process_folder_once()
             except FileNotFoundError:
-                if process.poll() is not None and process.returncode not in (0, None):
+                if downloader_finished and process.returncode not in (0, None):
                     raise RuntimeError(f"downloader exited with code {process.returncode} before raw files were found.")
                 now = time.monotonic()
                 if now - last_log >= 15:
@@ -692,15 +760,67 @@ class UploadProcessorApp(tk.Tk):
                 continue
             missing_dates = self._missing_expected_dates(result)
             if missing_dates:
+                if downloader_finished and process.returncode not in (0, None):
+                    raise RuntimeError(
+                        f"downloader exited with code {process.returncode} but raw dates are still missing: {', '.join(missing_dates)}"
+                    )
                 now = time.monotonic()
                 if now - last_log >= 15:
                     self._log(f"[auto] Waiting for missing raw dates: {', '.join(missing_dates)}")
                     last_log = now
                 time.sleep(5)
                 continue
-            self._log("[auto] Raw files found after downloader launch.")
+            if not downloader_finished:
+                last_complete_result = result
+                now = time.monotonic()
+                if now - last_log >= 15:
+                    self._log(
+                        f"[auto] Raw dates ready ({len(result.raw_files)} files) but downloader is still running. Waiting for it to finish..."
+                    )
+                    last_log = now
+                time.sleep(5)
+                continue
+            self._log(f"[auto] Downloader finished. Raw files found: {len(result.raw_files)}")
+            return result
+        if last_complete_result is not None:
+            # 다운로더가 30분 내에 종료되지 않았지만 날짜 데이터는 모두 확인된 상태.
+            # 지금 시점의 폴더를 한 번 더 스캔한 결과를 사용한다(그 사이 추가 저장분 반영).
+            result = self._process_folder_once()
+            self._log(
+                "[warning] Downloader did not exit within 30 minutes. Using the latest scan "
+                f"({len(result.raw_files)} files). Verify the data if the downloader was still saving files."
+            )
             return result
         raise TimeoutError("downloader raw files were not found within 30 minutes.")
+
+    def _downloader_brand_choices(self) -> list[str]:
+        """다운로더 봇 config.json에 등록된 브랜드명 목록을 읽어온다.
+
+        GUI의 '다운로더 봇 브랜드' 콤보박스를 채우는 데 쓴다. 파일이 없거나
+        읽기에 실패하면 빈 목록을 돌려준다(콤보박스는 그냥 비어 있게 됨).
+        """
+        config_path = _bundled_downloader_config_path()
+        if not config_path.exists():
+            return []
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return []
+        names = {
+            str(item.get("name") or "").strip()
+            for item in data.get("brands", [])
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        }
+        return sorted(names)
+
+    def _refresh_downloader_brand_choices(self) -> None:
+        choices = self._downloader_brand_choices()
+        if hasattr(self, "downloader_brand_combo"):
+            self.downloader_brand_combo.configure(values=choices)
+        if choices:
+            self._log(f"[안내] 다운로더 봇 브랜드 목록 갱신: {len(choices)}개 ({', '.join(choices)})")
+        else:
+            self._log("[안내] 다운로더 봇 config.json에서 브랜드 목록을 찾지 못했습니다 (경로/형식 확인 필요).")
 
     def _prepare_bundled_downloader(self) -> None:
         download_root = _default_download_root()
@@ -725,7 +845,9 @@ class UploadProcessorApp(tk.Tk):
             }
         except Exception as exc:
             self._log(f"[warning] downloader period prepare failed: {exc}")
-        downloader_brand = _downloader_brand_name(self.brand_var.get().strip(), data)
+        app_brand = self.brand_var.get().strip()
+        explicit_downloader_brand = self.downloader_brand_var.get().strip()
+        downloader_brand = explicit_downloader_brand or _downloader_brand_name(app_brand, data)
         if downloader_brand:
             data["active_brand"] = downloader_brand
             data["brand_name"] = downloader_brand
@@ -736,6 +858,17 @@ class UploadProcessorApp(tk.Tk):
                         data["media"] = media
                     break
         _atomic_write_text(config_path, json.dumps(data, ensure_ascii=False, indent=2))
+        period = data.get("last_run_period", {})
+        enabled_media = [
+            k for k, v in data.get("media", {}).items()
+            if isinstance(v, dict) and v.get("enabled", True)
+        ]
+        brand_source = "수동 선택" if explicit_downloader_brand else "자동 별칭 매칭"
+        self._log(
+            f"[ready] 다운로더 브랜드: '{app_brand}' -> '{downloader_brand}' ({brand_source}) "
+            f"/ 기간: {period.get('start', '?')} ~ {period.get('end', '?')} "
+            f"/ 매체: {', '.join(enabled_media) or '(없음)'}"
+        )
         self._log(f"[ready] downloader save folder: {download_root}")
 
     def _download_window(self):
@@ -796,6 +929,9 @@ class UploadProcessorApp(tk.Tk):
             update_mode=_template_update_mode(self.template_update_mode_var.get()),
             category_mode=_template_category_mode(self.template_category_mode_var.get()),
             rule=rule,
+            # 2026-07-16: 이번 실행의 다운로드 기간에 포함된 날짜의 시트만 연다.
+            # raw에 기간 밖 날짜가 섞여 있어도 해당 시트는 건드리지 않는다.
+            allowed_dates=self._expected_download_dates(),
         )
         if result.written_rows <= 0:
             raise ValueError(_zero_rows_diagnostic(result))
@@ -958,6 +1094,7 @@ class UploadProcessorApp(tk.Tk):
             "output_root": self.output_root_var.get().strip(),
             "login_command": self.login_command_var.get().strip(),
             "downloader_command": self.downloader_command_var.get().strip(),
+            "downloader_brand": self.downloader_brand_var.get().strip(),
             "schedule_mode": self.schedule_mode_var.get().strip(),
             "start_time": self.start_time_var.get().strip(),
             "custom_start": self.custom_start_var.get().strip(),
@@ -1120,8 +1257,23 @@ def _is_default_download_root(value: str) -> bool:
     return bool(text and text == default)
 
 
+# 2026-07-13: 다운로더 봇을 두 벌(번들 복사본 + C:\report-downloader)로
+# 관리하면서 코드/로그인 세션이 갈라지는 문제가 있어, C:\report-downloader
+# (마스터)를 유일한 봇 파츠로 사용한다. 마스터가 없는 환경(다른 PC 배포 등)
+# 에서는 기존 번들 복사본으로 폴백한다.
+# 일간 자동화는 마스터의 config_daily.json을 사용해 주간용 config.json과
+# 설정을 분리한다 (2026-07-13 config 오염 사고 재발 방지).
+_MASTER_BOT_ROOT = Path(os.environ.get("REPORT_DOWNLOADER_ROOT", r"C:\report-downloader"))
+
+
+def _bot_root() -> Path:
+    if (_MASTER_BOT_ROOT / "ad_report_downloader").exists():
+        return _MASTER_BOT_ROOT
+    return Path(__file__).resolve().parent.parent / "bots" / "report-downloader"
+
+
 def _default_bot_command(file_name: str) -> str:
-    path = Path(__file__).resolve().parent.parent / "bots" / "report-downloader" / file_name
+    path = _bot_root() / file_name
     return str(path) if path.exists() else ""
 
 
@@ -1135,7 +1287,10 @@ def _default_download_root() -> str:
 
 
 def _bundled_downloader_config_path() -> Path:
-    return _package_root() / "bots" / "report-downloader" / "ad_report_downloader" / "config.json"
+    root = _bot_root()
+    if root == _MASTER_BOT_ROOT:
+        return root / "ad_report_downloader" / "config_daily.json"
+    return root / "ad_report_downloader" / "config.json"
 
 
 def _is_packaged_placeholder_download_path(value: str) -> bool:
@@ -1150,10 +1305,24 @@ def _is_packaged_placeholder_download_path(value: str) -> bool:
 
 
 def _downloader_brand_name(app_brand: str, config: dict) -> str:
+    """이 프로그램(키워드 소진내역 가공)의 브랜드명을 다운로더 봇 config.json의
+    브랜드명으로 변환한다.
+
+    이 프로그램은 항상 "일일" 처리를 전제로 하므로, "법무법인 태하"처럼 접미사가
+    없는 짧은 이름이 들어오면 가능하면 "법무법인 태하 - 데일리"처럼 '- 데일리'가
+    붙은 항목으로 우선 연결해야 한다.
+
+    2026-07-13 버그 수정: 예전에는 정확히 일치하는 이름이 있으면(desired in names)
+    별칭(alias) 맵을 확인하기도 전에 그대로 반환했다. 그런데 다운로더 봇의
+    config.json에는 "법무법인 태하"라는 옛 수동/주간 브랜드 항목이 "법무법인
+    태하 - 데일리"와 별개로 계속 남아 있어서, 정확히 "법무법인 태하"로만 저장된
+    브랜드 프로필은 항상 옛 주간 항목으로 잘못 연결되고 있었다(다운로더가 매일
+    실행해야 할 일간 키워드 보고서 대신 옛 주간/DA 보고서를 받아오는 원인).
+    그래서 별칭(alias) 매칭을 정확 일치보다 먼저 검사하도록 순서를 바꿨다 —
+    "- 데일리" 항목이 실제로 존재하면 그쪽을 항상 우선한다.
+    """
     desired = str(app_brand or "").strip()
     names = [str(item.get("name") or "").strip() for item in config.get("brands", []) if isinstance(item, dict)]
-    if desired in names:
-        return desired
     aliases = {
         "법무법인 오현": "법무법인 오현 - 데일리",
         "법무법인 태하": "법무법인 태하 - 데일리",
@@ -1162,6 +1331,8 @@ def _downloader_brand_name(app_brand: str, config: dict) -> str:
     alias = aliases.get(desired)
     if alias in names:
         return alias
+    if desired in names:
+        return desired
     for name in names:
         if desired and (name.startswith(desired) or desired.startswith(name)):
             return name
@@ -1173,13 +1344,23 @@ def _default_login_command() -> str:
 
 
 def _default_downloader_command() -> str:
-    return _default_bot_command("run.bat")
+    # 마스터 봇에서는 run_daily.bat(일간 자동화 전용, config_daily.json 사용)을
+    # 우선 사용한다. run.bat은 주간 수동 실행용 GUI라 자동화에 부적합.
+    return _default_bot_command("run_daily.bat") or _default_bot_command("run.bat")
 
 
 def _normalize_external_command(command: str) -> str:
     text = str(command or "").strip()
     if text.endswith(" 실행"):
         text = text[: -len(" 실행")].strip()
+    # 2026-07-13 봇 통합: 저장된 프로필/예약이 옛 번들 봇(bots\report-downloader)의
+    # run.bat을 가리키고 있으면, 마스터 봇의 run_daily.bat으로 자동 전환한다.
+    # (저장된 설정 파일을 일일이 수정하지 않아도 통합이 적용되도록)
+    lowered = text.casefold().replace("/", "\\")
+    if "bots\\report-downloader\\run.bat" in lowered:
+        master_daily = _MASTER_BOT_ROOT / "run_daily.bat"
+        if master_daily.exists():
+            return str(master_daily)
     return text
 
 

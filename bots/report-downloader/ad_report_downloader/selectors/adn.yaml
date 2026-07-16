@@ -1,0 +1,65 @@
+# ADN 광고 일별/월별 실적 보고서 셀렉터
+# portal_type: "agency"    → 대행사 포털 (계정 목록에서 전환)
+# portal_type: "advertiser" → 광고주 포털 (바로 보고서 이동)
+base_url: "https://member.acrosspf.com"
+portal_type: "agency"
+
+login:
+  # 로그인 리디렉트 판별
+  login_url_patterns:
+    - "/login"
+  # 로그인 페이지 요소 (로그인 여부 확인용)
+  login_element_selector: "#manage_login_id, input[id='manage_login_id'], input[name='login_id'], input[placeholder*='아이디'], input[placeholder*='ID']"
+  # 로그인 후 이동할 계정 목록 페이지 (대행사 모드에서만 사용)
+  account_list_path: "/agency.php"
+  agency_ready_selector: "a[onclick*='_jsCmLogin']"
+
+  # ── 자동 로그인 폼 셀렉터 (Chrome Password Manager autofill 방식) ──
+  # config.json의 media.adn.login_id 를 입력하고 Tab → 비밀번호 자동완성
+  agency_tab_selector: "[role='tab']:has-text('대행사'), li:has-text('대행사') a, a:has-text('대행사')"
+  login_id_input: "input#manage_login_id, input[name='login_id'], input[placeholder*='아이디'], input[placeholder*='ID']"
+  login_pw_input: "input#manage_login_pw, input[name='login_pw'], input[type='password']"
+  submit_button: "button[type='submit']:has-text('로그인'), input[type='submit'], a.btn:has-text('로그인'), button:has-text('로그인')"
+
+account_list:
+  # 계정 목록 테이블 행 (로그인 직후 기본 랜딩 페이지)
+  table_row: "tbody tr[role='row'], tbody tr"
+  # 계정명이 표시되는 셀
+  account_name_cell: "td:nth-child(3)"
+  # 계정 전환 버튼 ("구버전")
+  # 확인된 HTML: <a href="javascript:;" onclick="_jsCmLogin('...','...','1')">구버전</a>
+  switch_button: "a:has-text('구버전'), a[onclick*='_jsCmLogin']"
+  legacy_switch_url: "https://member.acrosspf.com/common/login_manage.php"
+
+report:
+  # 직접 URL 이동 (가장 안정적)
+  report_url_path: "/report/report_dailys.php"
+  # 사이드바 보고서 메뉴
+  # 확인된 HTML: <a class="nav-link" id="menu1" href="/report/report_dailys.php"...>
+  sidebar_report: "a#menu1, a.nav-link[href*='report_da']"
+  # 드롭다운 서브메뉴: "일별/월별 실적 보고서"
+  submenu_daily: "a[href='/report/report_dailys.php']:has-text('일별'), a:has-text('일별/월별 실적 보고서')"
+  ready_selector: "input[name='sdate'], #datepicker1"
+
+period:
+  # 확인된 HTML:
+  # <input type="text" name="sdate" id="datepicker1" value="20260601" class="hasDatepicker">
+  # <input type="text" name="edate" id="datepicker2" value="20260630">
+  # 날짜 형식: YYYYMMDD (구분자 없음)
+  start_input: "input[name='sdate'], #datepicker1"
+  end_input:   "input[name='edate'], #datepicker2"
+  search_form: "form#searchfrm, form[name='searchfrm']"
+
+filters:
+  # 확인된 HTML:
+  # <div id="div_resource"> <input type="checkbox" name="chk_resource" ...>
+  # <label class="custom-control-label" for="typeD2">캠페인/그룹/소재 포함</label>
+  resource_checkbox: "input[name='chk_resource'], #div_resource input[type='checkbox']"
+  resource_label:    "label[for='typeD2'], #div_resource label.custom-control-label"
+
+download:
+  # 확인된 HTML:
+  # <a href="javascript:;" onclick="jsReportsDW_new()" class="btn btn-dark">다운로드</a>
+  button: "a.btn.btn-dark:has-text('다운로드'), a[onclick*='jsReportsDW_new'], a[onclick*='jsAgencyReportsDW']"
+  button_fallback: "a[onclick*='ReportsDW']:has-text('다운로드'), a[onclick*='jsReportsDW'], a[onclick*='jsAgencyReportsDW']"
+  timeout_sec: 120
