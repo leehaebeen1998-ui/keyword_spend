@@ -56,6 +56,10 @@ _MEDIA_ORDER = [
     "adn", "mobion_banner", "mobion_daily", "x", "google_analytics", "gfa",
 ]
 
+# API로 수집하는 매체 — 브라우저(Chrome)가 필요 없다.
+# 네이버는 2026-08 다차원 보고서(브라우저) → 검색광고 API로 완전 전환됨.
+_API_MEDIA = {"naver"}
+
 
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
@@ -101,6 +105,15 @@ def _find_chrome_exe() -> str:
     raise RuntimeError("Chrome 실행 파일을 찾을 수 없습니다. Google Chrome이 설치되어 있는지 확인하세요.")
 
 
+def _build_api_downloader(media_code: str, config: dict, account: dict,
+                          use_mock: bool = False):
+    """API 매체 전용 다운로더 팩토리 (Qt/Playwright 의존 없음)."""
+    if media_code == "naver":
+        from downloader.naver_api import NaverApiDownloader
+        return NaverApiDownloader(config, account)
+    raise RuntimeError(f"API 다운로더가 없는 매체: {media_code}")
+
+
 # ── CliRunner ────────────────────────────────────────────────────────────────
 class CliRunner:
     """Qt 없이 순차적으로 다운로드를 실행한다."""
@@ -131,7 +144,25 @@ class CliRunner:
 
         log("SYSTEM", f"총 {len(ordered)}개 매체 / {len(units)}개 계정 실행 시작")
 
-        # 기존 다운로더 팩토리 재사용
+        # ── 1) API 매체 (네이버 등) — 브라우저 없이 실행 ─────────────────────
+        # 여기서는 orchestrator(_build_downloader)를 쓰지 않는다. orchestrator는
+        # 모듈 최상단에서 PySide6를 import하므로, API 전용 실행까지 Qt 설치에
+        # 묶이면 불필요한 실패 지점이 생긴다. 네이버 API 경로는 Qt·Playwright
+        # 어느 쪽도 필요 없으므로 전용 팩토리로 바로 만든다.
+        api_units = [(m, a) for m, a in units if m in _API_MEDIA]
+        browser_units = [(m, a) for m, a in units if m not in _API_MEDIA]
+
+        login_blocked: set[str] = set()
+        for media_code, account in api_units:
+            self._run_one(None, media_code, account, _build_api_downloader, login_blocked)
+
+        # ── 2) 브라우저 매체 — 필요할 때만 Chrome 실행 ───────────────────────
+        if not browser_units:
+            log("SYSTEM", "브라우저 매체 없음 — Chrome 실행 생략")
+            log("SYSTEM", f"다운로드 완료 — 성공 {len(self.download_results)}건")
+            return self.download_results
+
+        # 기존 다운로더 팩토리 재사용 (브라우저 매체가 있을 때만 import)
         from core.orchestrator import _build_downloader
         from core.chrome_profile import resolve_chrome_profile
         from playwright.sync_api import sync_playwright
@@ -163,8 +194,7 @@ class CliRunner:
             )
             log("SYSTEM", "Chrome 실행 완료")
             try:
-                login_blocked: set[str] = set()
-                for media_code, account in units:
+                for media_code, account in browser_units:
                     if media_code in login_blocked:
                         acct_label = account.get("account_name") or account.get("account_id") or "기본"
                         log(media_code, f"건너뜀 [{acct_label}] (로그인 필요)")

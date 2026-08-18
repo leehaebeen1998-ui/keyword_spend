@@ -26,6 +26,9 @@ import utils.logger as log_mod
 if TYPE_CHECKING:
     from downloader.base import BaseDownloader, DownloadResult
 
+# API로 수집하는 매체 — 브라우저(Chrome)가 필요 없다 (cli.py의 _API_MEDIA와 동일 규칙)
+_API_MEDIA = {"naver"}
+
 # media_code → 파이프라인 표준 매체명 매핑
 _MEDIA_CODE_TO_NAME: dict[str, str] = {
     "naver":             "Naver",
@@ -96,7 +99,8 @@ def _build_downloader(media_code: str, config: dict, account: dict,
     _real_cls = None
     try:
         if media_code == "naver":
-            from downloader.naver import NaverDownloader as _real_cls          # type: ignore
+            # 2026-08: 다차원 보고서(브라우저) → 검색광고 API로 완전 전환
+            from downloader.naver_api import NaverApiDownloader as _real_cls   # type: ignore
         elif media_code == "google":
             from downloader.google import GoogleDownloader as _real_cls        # type: ignore
         elif media_code == "google_sa":
@@ -171,7 +175,14 @@ class OrchestratorWorker(QThread):
                 self.run_finished.emit(summary)
                 return
 
+            browser_needed = any(m not in _API_MEDIA for m in enabled)
+
             if params.use_mock:
+                self._run_all(None, enabled, summary, params)
+            elif not browser_needed:
+                # 전체가 API 매체(네이버 등)면 Chrome을 띄우지 않는다
+                self._emit_log(self._ts(), "SYSTEM",
+                    "브라우저 매체 없음 — Chrome 실행 생략 (API 호출로 수집)")
                 self._run_all(None, enabled, summary, params)
             else:
                 from playwright.sync_api import sync_playwright
