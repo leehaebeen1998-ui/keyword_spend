@@ -33,3 +33,6 @@ downloads/
 upload_processor_schedule_*.json
 daily_auto_run.log
 *.1.log
+portable_settings/
+templates/
+brand_profiles.backup.json

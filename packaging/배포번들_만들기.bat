@@ -45,6 +45,7 @@ tar -a -c -f "%OUT%" ^
   --exclude="*keyword_spend_code_*.zip" ^
   app bots python ms-playwright run.bat install.bat rules.bat README.md ^
   daily_auto_run.bat daily_auto_run_register.bat daily_auto_run_check.bat ^
+  portable_export.bat portable_import.bat portable_settings ^
   > "%BUILD_LOG%" 2>&1
 if errorlevel 1 goto tar_failed
 
@@ -72,7 +73,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$stage=Join-Path $env:TEMP ('ks_bundle_'+[guid]::NewGuid().ToString('N'));" ^
   "New-Item -ItemType Directory -Path $stage | Out-Null;" ^
   "$targets=@('app','bots','python','ms-playwright','run.bat','install.bat','rules.bat','README.md'," ^
-  "  'daily_auto_run.bat','daily_auto_run_register.bat','daily_auto_run_check.bat');" ^
+  "  'daily_auto_run.bat','daily_auto_run_register.bat','daily_auto_run_check.bat'," ^
+  "  'portable_export.bat','portable_import.bat','portable_settings');" ^
   "$exDir=@('chrome_profile','logs','downloads','__pycache__','BrowserMetrics');" ^
   "$exFile=@('*.log','*.pyc','*.tmp','budget_secrets.dat','budget_alert_state.json','keyword_spend_full_*.zip','keyword_spend_code_*.zip');" ^
   "foreach($t in $targets){ $src=Join-Path $root $t; if(-not(Test-Path $src)){continue};" ^
